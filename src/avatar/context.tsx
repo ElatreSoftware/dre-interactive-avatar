@@ -464,7 +464,13 @@ export function AvatarProvider({
         timer = null;
       }
     };
-    const onPageHide = () => void teardown();
+    // Report the ending before tearing down, so a closed tab frees its line
+    // now rather than waiting out the stale window. `endWith` is guarded
+    // against reporting twice, so this is safe if the user also pressed End.
+    const onPageHide = () => {
+      endWith("client");
+      void teardown();
+    };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pagehide", onPageHide);
@@ -473,7 +479,7 @@ export function AvatarProvider({
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", onPageHide);
     };
-  }, [config.teardownAfterHiddenMs, stopSession, teardown]);
+  }, [config.teardownAfterHiddenMs, endWith, stopSession, teardown]);
 
   const value = useMemo<AvatarContextValue>(
     () => ({

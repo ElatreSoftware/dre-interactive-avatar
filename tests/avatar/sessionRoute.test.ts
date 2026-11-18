@@ -4,7 +4,7 @@ vi.mock("@/lib/db", async () => ({ prisma: (await import("../support/fakePrisma"
 
 import { GRANT_HEADER, signGrant } from "@/embed/grant";
 import { sessionRateLimiter } from "@/embed/rateLimit";
-import { INTERNAL_EMBED_KEY, resetRegistryCache } from "@/embed/registry";
+import { resetRegistryCache } from "@/embed/registry";
 import { resetServerEnvCache } from "@/lib/env";
 import { db, resetDb, seedActiveSession, seedKey } from "../support/fakePrisma";
 
@@ -30,12 +30,12 @@ const VALID_ENV = {
   LIVEAVATAR_DEFAULT_AVATAR_ID: "avatar-default",
 };
 
-/** The first-party page's grant; every pre-existing test is one of these. */
-function internalGrant(): string {
-  return signGrant({ embedKey: INTERNAL_EMBED_KEY, parentOrigin: SELF_ORIGIN }, GRANT_SECRET);
+/** There is only one way in now: a customer key, from an origin it names. */
+function defaultGrant(): string {
+  return signGrant({ embedKey: CUSTOMER_KEY.key, parentOrigin: PARENT_ORIGIN }, GRANT_SECRET);
 }
 
-function post(body: unknown = {}, grant: string | null = internalGrant()) {
+function post(body: unknown = {}, grant: string | null = defaultGrant()) {
   return new Request(`${SELF_ORIGIN}/api/avatar/session`, {
     method: "POST",
     headers: {
@@ -120,14 +120,14 @@ describe("POST /api/avatar/session", () => {
     mockUpstream(200, { data: { session_id: "s", session_token: "t" } });
     const { POST } = await importRoute();
 
-    await POST(post({ avatarId: "avatar-9", isSandbox: true, dynamicVariables: { name: "Dre" } }));
+    await POST(post({ isSandbox: true }));
 
     const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     expect(url).toBe("https://api.liveavatar.com/v1/sessions/token");
     expect((init.headers as Record<string, string>)["X-API-KEY"]).toBe(VALID_ENV.LIVEAVATAR_API_KEY);
     expect(JSON.parse(init.body as string)).toEqual({
       mode: "LITE",
-      avatar_id: "avatar-9",
+      avatar_id: "avatar-acme",
       is_sandbox: true,
       // Asks the vendor for the best stream it will give us; the layer the
       // browser actually receives is still chosen by adaptive streaming.
@@ -135,12 +135,14 @@ describe("POST /api/avatar/session", () => {
       elevenlabs_agent_config: {
         secret_id: VALID_ENV.LIVEAVATAR_ELEVENLABS_SECRET_ID,
         agent_id: VALID_ENV.ELEVENLABS_AGENT_ID,
-        dynamic_variables: { name: "Dre" },
+        dynamic_variables: { brand: "Acme" },
       },
     });
   });
 
-  it("falls back to the configured default avatar", async () => {
+  it("falls back to the configured default avatar when the key names none", async () => {
+    resetDb();
+    seedKey({ ...CUSTOMER_KEY, avatarId: "" });
     mockUpstream(200, { data: { session_id: "s", session_token: "t" } });
     const { POST } = await importRoute();
 
@@ -150,6 +152,8 @@ describe("POST /api/avatar/session", () => {
   });
 
   it("400s when no avatar id is available anywhere", async () => {
+    resetDb();
+    seedKey({ ...CUSTOMER_KEY, avatarId: "" });
     vi.stubEnv("LIVEAVATAR_DEFAULT_AVATAR_ID", "");
     resetServerEnvCache();
     const { POST } = await importRoute();
@@ -289,14 +293,6 @@ describe("the embed grant gate", () => {
     expect(response.status).toBe(403);
   });
 
-  it("ties the internal key to this very origin", async () => {
-    const elsewhere = signGrant(
-      { embedKey: INTERNAL_EMBED_KEY, parentOrigin: "https://somewhere-else.example" },
-      GRANT_SECRET,
-    );
-    const { POST } = await importRoute();
-    expect((await POST(post({}, elsewhere))).status).toBe(403);
-  });
 
   it("leaks nothing about why it refused", async () => {
     const { POST } = await importRoute();
@@ -432,48 +428,3 @@ describe("concurrent call limits", () => {
   });
 });
 
-describe("behind a TLS-terminating proxy", () => {
-  /**
-   * The first-party page signs a grant for its own origin, and this route
-   * checks it. nginx talks to the app over plain HTTP, so `request.url` says
-   * `http://` while the page saw `https://`. Deriving the two differently
-   * made every first-party call fail with "This page is not allowed to start
-   * a session" the moment the app went behind TLS.
-   */
-  function proxiedRequest(grant: string): Request {
-    return new Request("http://127.0.0.1:3000/api/avatar/session", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        host: "avatar.dr-e.com",
-        "x-forwarded-proto": "https",
-        [GRANT_HEADER]: grant,
-      },
-      body: "{}",
-    });
-  }
-
-  it("accepts the first-party page's own grant", async () => {
-    mockUpstream(200, {
-      code: 100,
-      message: "ok",
-      data: { session_id: "sess-1", session_token: "tok-1" },
-    });
-
-    const grant = signGrant(
-      { embedKey: INTERNAL_EMBED_KEY, parentOrigin: "https://avatar.dr-e.com" },
-      GRANT_SECRET,
-    );
-
-    expect((await (await importRoute()).POST(proxiedRequest(grant))).status).toBe(200);
-  });
-
-  it("still refuses a grant for somewhere else entirely", async () => {
-    const grant = signGrant(
-      { embedKey: INTERNAL_EMBED_KEY, parentOrigin: "https://attacker.example" },
-      GRANT_SECRET,
-    );
-
-    expect((await (await importRoute()).POST(proxiedRequest(grant))).status).toBe(403);
-  });
-});

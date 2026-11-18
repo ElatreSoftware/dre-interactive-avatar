@@ -9,8 +9,9 @@ import type { EmbedKeyRecord } from "./registry";
  * or on a browser having flushed its last batch.
  *
  * The hard part is knowing when a call ended. A browser that crashes, loses
- * power or is force-quit never tells us, so a slot is released two ways: the
- * end of the call reports it, or the stale sweep below reclaims it.
+ * power or is force-quit never tells us, so a slot is released three ways:
+ * the end of the call reports it, nothing is heard from it for ten minutes,
+ * or it is simply too old to still be a call.
  *
  * Rows are closed rather than deleted. Setting `deletedAt` is what frees the
  * line; the row stays, so a finished call can still be looked at — when it
@@ -21,10 +22,31 @@ import type { EmbedKeyRecord } from "./registry";
 /** A session nothing has been heard from for this long is assumed dead. */
 const STALE_AFTER_MS = 10 * 60 * 1000;
 
+/**
+ * No call holds a line longer than this, whatever it claims.
+ *
+ * The quiet check above trusts a stream of events: as long as something keeps
+ * arriving, the row stays open. That is right for a real call and wrong for
+ * anything stuck — a page left open in a background tab, a loop that keeps
+ * reporting, a bug. Vendor sessions have their own maximum duration well
+ * under an hour, so a row older than this is not a call any more, whatever
+ * its last event said.
+ */
+const MAX_AGE_MS = 60 * 60 * 1000;
+
+function maxAgeMs(): number {
+  const configured = Number(process.env.SESSION_MAX_AGE_MINUTES);
+  return Number.isFinite(configured) && configured > 0 ? configured * 60_000 : MAX_AGE_MS;
+}
+
 export type ClaimResult = { ok: true } | { ok: false; active: number; limit: number };
 
 function staleBefore(now: number): Date {
   return new Date(now - STALE_AFTER_MS);
+}
+
+function startedBefore(now: number): Date {
+  return new Date(now - maxAgeMs());
 }
 
 /**
@@ -38,7 +60,16 @@ export async function countActiveSessions(
   now: number = Date.now(),
 ): Promise<number> {
   await prisma.activeSession.updateMany({
-    where: { embedKeyValue, deletedAt: null, lastSeenAt: { lt: staleBefore(now) } },
+    where: {
+      embedKeyValue,
+      deletedAt: null,
+      OR: [
+        // Nothing heard from it lately.
+        { lastSeenAt: { lt: staleBefore(now) } },
+        // Or old enough that it cannot still be a call, however chatty it is.
+        { startedAt: { lt: startedBefore(now) } },
+      ],
+    },
     data: { deletedAt: new Date(now) },
   });
   return prisma.activeSession.count({ where: { embedKeyValue, deletedAt: null } });

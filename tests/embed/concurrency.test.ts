@@ -25,12 +25,14 @@ function record(maxConcurrentSessions: number | null): EmbedKeyRecord {
     allowedOrigins: ["https://acme.example"],
     expiresAt: null,
     maxConcurrentSessions,
-    internal: false,
   };
 }
 
 beforeEach(() => resetDb());
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("checkConcurrency", () => {
   it("allows anything when no limit is set", async () => {
@@ -181,5 +183,70 @@ describe("when the database misbehaves", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     failOnce(new Error("connection refused"));
     await expect(run()).resolves.toBeUndefined();
+  });
+});
+
+describe("a session that is simply too old", () => {
+  /**
+   * The quiet check trusts a stream of events: while something keeps
+   * arriving, the row stays open. That is right for a real call and wrong for
+   * anything stuck — a page left open in a background tab, a loop that keeps
+   * reporting. Vendor sessions have their own maximum duration well under an
+   * hour, so an hour-old row is not a call any more.
+   */
+  it("frees the line after an hour, however recently it reported in", async () => {
+    seedActiveSession({
+      avatarSessionId: "marathon",
+      startedAt: new Date(NOW - 61 * MINUTE),
+      lastSeenAt: new Date(NOW - 1000), // chatty right up to now
+    });
+
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(0);
+    expect(db.activeSessions[0]!.deletedAt).toBeInstanceOf(Date);
+  });
+
+  it("leaves a long call alone before the hour is up", async () => {
+    seedActiveSession({
+      avatarSessionId: "long",
+      startedAt: new Date(NOW - 59 * MINUTE),
+      lastSeenAt: new Date(NOW - 1000),
+    });
+
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
+  });
+
+  it("lets the next caller through once the old one is swept", async () => {
+    seedActiveSession({
+      avatarSessionId: "stuck",
+      startedAt: new Date(NOW - 2 * 60 * MINUTE),
+      lastSeenAt: new Date(NOW - 1000),
+    });
+
+    // Limit of one, and the one is occupied by something that cannot be a
+    // call any more. The caller asking is what clears it.
+    await expect(checkConcurrency(record(1), NOW)).resolves.toEqual({ ok: true });
+  });
+
+  it("takes the configured age when one is set", async () => {
+    vi.stubEnv("SESSION_MAX_AGE_MINUTES", "15");
+    seedActiveSession({
+      avatarSessionId: "stuck",
+      startedAt: new Date(NOW - 16 * MINUTE),
+      lastSeenAt: new Date(NOW - 1000),
+    });
+
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(0);
+  });
+
+  it("ignores a nonsensical configured age", async () => {
+    vi.stubEnv("SESSION_MAX_AGE_MINUTES", "soon");
+    seedActiveSession({
+      avatarSessionId: "fine",
+      startedAt: new Date(NOW - 30 * MINUTE),
+      lastSeenAt: new Date(NOW - 1000),
+    });
+
+    // Falls back to the hour, so this is still live.
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
   });
 });

@@ -42,10 +42,21 @@ function captureFlushes(): void {
       );
     }),
   );
-  sendBeacon = vi.fn((_url: string, blob: Blob) => {
-    void blob.text().then((text) => {
-      captured.push(...(JSON.parse(text) as { events: FootprintPayload[] }).events);
-    });
+  // jsdom's Blob cannot be read back — no `text()`, and `Response` makes
+  // "[object Blob]" of it — so it is replaced with something that keeps its
+  // contents. Reading the body matters: a beacon is how the end of a call
+  // leaves the browser, and asserting only that one was sent would not notice
+  // an empty one.
+  class ReadableBlob {
+    readonly text: string;
+    constructor(parts: string[]) {
+      this.text = parts.join("");
+    }
+  }
+  vi.stubGlobal("Blob", ReadableBlob);
+
+  sendBeacon = vi.fn((_url: string, blob: ReadableBlob) => {
+    captured.push(...(JSON.parse(blob.text) as { events: FootprintPayload[] }).events);
     return true;
   });
   vi.stubGlobal("navigator", {
@@ -428,5 +439,74 @@ describe("one ending per session", () => {
     }
 
     expect(events.filter((type) => type === "session_ended")).toHaveLength(2);
+  });
+});
+
+describe("a tab closed without ending the call", () => {
+  /**
+   * The commonest way a call ends. Nobody presses End; the tab goes away.
+   * Without an ending reported, the customer's line stays occupied until the
+   * ten-minute stale sweep reclaims it — and with a limit of one, that is ten
+   * minutes during which they cannot call back.
+   */
+  it("reports the ending on pagehide, by beacon", async () => {
+    stubSessionEndpoint();
+    stubMicrophone("granted");
+
+    function Harness() {
+      const footprints = useFootprints({ sessionKey: "session-1", grant: "g" });
+      return (
+        <AvatarProvider config={{ avatarId: "avatar-1" }} onEvent={footprints.onEvent}>
+          <InteractiveAvatar />
+        </AvatarProvider>
+      );
+    }
+
+    render(<Harness />);
+    await userEvent.click(screen.getByRole("button", { name: /start video call/i }));
+    await waitFor(() => expect(FakeSession.last?.calls.start).toBe(1));
+
+    sendBeacon.mockClear();
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    await waitFor(() => expect(typesOf()).toContain("session_ended"));
+    // A fetch started during unload is cancelled; a beacon is not.
+    expect(sendBeacon).toHaveBeenCalled();
+  });
+
+  it("reports it once, even if the user pressed End first", async () => {
+    stubSessionEndpoint();
+    const events: string[] = [];
+
+    function Probe() {
+      const { startSession, stopSession } = useSession();
+      return (
+        <>
+          <button type="button" onClick={() => void startSession()}>
+            start
+          </button>
+          <button type="button" onClick={() => void stopSession()}>
+            stop
+          </button>
+        </>
+      );
+    }
+
+    render(
+      <AvatarProvider config={{ avatarId: "avatar-1" }} onEvent={(e) => events.push(e.type)}>
+        <Probe />
+      </AvatarProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "start" }));
+    await waitFor(() => expect(FakeSession.last?.calls.start).toBe(1));
+    await userEvent.click(screen.getByRole("button", { name: "stop" }));
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    expect(events.filter((type) => type === "session_ended")).toHaveLength(1);
   });
 });

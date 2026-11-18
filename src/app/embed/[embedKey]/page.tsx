@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { signGrant } from "@/embed/grant";
+import { mayBeFramed } from "@/embed/framing";
 import { embedOriginAllowed, findEmbedKey } from "@/embed/registry";
 import { parseOrigin, serializeOrigin } from "@/embed/originMatch";
 import { originFromHeaders } from "@/embed/requestOrigin";
@@ -39,6 +40,10 @@ export default async function EmbedPage({ params, searchParams }: PageProps) {
   const query = await searchParams;
   const headerList = await headers();
 
+  // Opened in a tab rather than embedded. A public key pasted into an address
+  // bar would otherwise load a working call that someone pays for.
+  if (!mayBeFramed(headerList)) notFound();
+
   const claimed = typeof query.o === "string" ? query.o : undefined;
   const selfOrigin = originFromHeaders(headerList) ?? undefined;
 
@@ -47,9 +52,19 @@ export default async function EmbedPage({ params, searchParams }: PageProps) {
   const parentOrigin = resolveParentOrigin(claimed, headerList.get("referer")) ?? selfOrigin;
   if (!parentOrigin) notFound();
 
-  // Belt to the middleware's braces. A mismatch here means the claim and the
+  // Belt to the proxy's braces. A mismatch here means the claim and the
   // allowlist disagree, and the claim loses.
-  if (!embedOriginAllowed(record, parentOrigin, selfOrigin)) notFound();
+  if (!embedOriginAllowed(record, parentOrigin)) {
+    // The response is a bare 404 on purpose — an unknown key and a wrong
+    // origin must look identical from outside. The log is where the answer
+    // lives, because "404" on its own has cost real debugging time, and
+    // http://localhost:5500 and http://127.0.0.1:5500 are different origins.
+    console.warn(
+      `[embed] ${record.key} refused "${parentOrigin}": allowed are ` +
+        `${record.allowedOrigins.join(", ") || "(none)"}`,
+    );
+    notFound();
+  }
 
   const grant = signGrant({ embedKey: record.key, parentOrigin }, getGrantSecret());
 

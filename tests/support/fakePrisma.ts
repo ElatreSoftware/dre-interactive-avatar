@@ -133,6 +133,9 @@ interface ActiveWhere {
   sessionKey?: string;
   avatarSessionId?: string;
   lastSeenAt?: { lt?: Date };
+  startedAt?: { lt?: Date };
+  /** Prisma's OR: any one of these, plus everything outside it. */
+  OR?: ActiveWhere[];
   /** `null` means "still running"; `{ not: null, lt }` means "closed before". */
   deletedAt?: Date | null | { not?: null; lt?: Date };
 }
@@ -155,6 +158,8 @@ function matchesActive(row: FakeActiveSessionRow, where?: ActiveWhere): boolean 
   if (where.sessionKey && row.sessionKey !== where.sessionKey) return false;
   if (where.avatarSessionId && row.avatarSessionId !== where.avatarSessionId) return false;
   if (where.lastSeenAt?.lt && !(row.lastSeenAt < where.lastSeenAt.lt)) return false;
+  if (where.startedAt?.lt && !(row.startedAt < where.startedAt.lt)) return false;
+  if (where.OR && !where.OR.some((clause) => matchesActive(row, clause))) return false;
   return matchesDeletedAt(row, where.deletedAt);
 }
 

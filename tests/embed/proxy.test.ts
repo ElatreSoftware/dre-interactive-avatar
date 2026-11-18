@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 vi.mock("@/lib/db", async () => ({ prisma: (await import("../support/fakePrisma")).prisma }));
 
 import { proxy } from "@/proxy";
-import { INTERNAL_EMBED_KEY, resetRegistryCache } from "@/embed/registry";
+import { resetRegistryCache } from "@/embed/registry";
 import { failOnce, resetDb, seedKey } from "../support/fakePrisma";
 
 async function csp(path: string): Promise<string> {
@@ -42,9 +42,6 @@ describe("frame-ancestors", () => {
     await expect(csp(path)).resolves.toBe("frame-ancestors 'none'");
   });
 
-  it("lets the first-party page frame itself", async () => {
-    await expect(csp(`/embed/${INTERNAL_EMBED_KEY}`)).resolves.toBe("frame-ancestors 'self'");
-  });
 
   it("never sets X-Frame-Options, which cannot express an allowlist", async () => {
     const response = await proxy(new NextRequest("https://widget.example/embed/pk_dre_7f3a91c4"));
@@ -66,5 +63,30 @@ describe("frame-ancestors", () => {
   it("adds localhost only outside production", async () => {
     vi.stubEnv("NODE_ENV", "development");
     await expect(csp("/embed/pk_dre_7f3a91c4")).resolves.toContain("http://localhost:*");
+  });
+});
+
+describe("the host's own page", () => {
+  it("answers 401, with a status code and not just a message", async () => {
+    const response = await proxy(new NextRequest("https://widget.example/"));
+
+    // A 200 saying "unauthorized" lies to everything that reads status codes.
+    expect(response.status).toBe(401);
+    expect(await response.text()).toContain("You are unauthorized to access");
+  });
+
+  it("is not framable either", async () => {
+    const response = await proxy(new NextRequest("https://widget.example/"));
+    expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+  });
+
+  it("is not cached", async () => {
+    const response = await proxy(new NextRequest("https://widget.example/"));
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("leaves the embed route alone", async () => {
+    const response = await proxy(new NextRequest("https://widget.example/embed/pk_dre_7f3a91c4"));
+    expect(response.status).toBe(200);
   });
 });

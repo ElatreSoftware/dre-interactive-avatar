@@ -156,9 +156,11 @@ export function useFootprints(options: UseFootprintsOptions): Footprints {
             interruptions: interruptions.current,
           });
           startedAt.current = null;
-          // The call is over and this is the event worth keeping; do not wait
-          // for an idle timer that the closing tab may never reach.
-          collectorRef.current.flush();
+          // Sent as a beacon, not a fetch. The commonest way a call ends is
+          // the tab closing, and a fetch started during unload is cancelled —
+          // which would lose the one event that frees the customer's line.
+          // A beacon works just as well on a page that is staying put.
+          collectorRef.current.flush("beacon");
           return;
 
         case "interruption":

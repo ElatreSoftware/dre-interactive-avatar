@@ -6,7 +6,6 @@ import {
   embedOriginAllowed,
   findEmbedKey,
   hasExpired,
-  INTERNAL_EMBED_KEY,
   resetRegistryCache,
 } from "@/embed/registry";
 import { db, failOnce, resetDb, seedKey } from "../support/fakePrisma";
@@ -27,7 +26,6 @@ describe("findEmbedKey", () => {
     await expect(findEmbedKey("pk_dre_7f3a91c4")).resolves.toMatchObject({
       name: "Acme Corp",
       avatarId: "avatar-acme",
-      internal: false,
     });
   });
 
@@ -51,9 +49,6 @@ describe("findEmbedKey", () => {
     await expect(findEmbedKey("pk_dre_7f3a91c4")).resolves.toBeNull();
   });
 
-  it("always provides the reserved internal key, with no row behind it", async () => {
-    await expect(findEmbedKey(INTERNAL_EMBED_KEY)).resolves.toMatchObject({ internal: true });
-  });
 });
 
 describe("caching", () => {
@@ -66,7 +61,7 @@ describe("caching", () => {
 
     await findEmbedKey("pk_dre_7f3a91c4");
     await findEmbedKey("pk_dre_7f3a91c4");
-    await findEmbedKey(INTERNAL_EMBED_KEY);
+    await findEmbedKey("pk_other");
 
     expect(findMany).toHaveBeenCalledTimes(1);
   });
@@ -123,9 +118,9 @@ describe("when the database is unreachable", () => {
     failOnce(new Error("connection refused"));
     vi.spyOn(console, "error").mockImplementation(() => {});
 
+    // Nothing gets in while the registry is unreadable: there is no
+    // first-party exception to fall back to.
     await expect(findEmbedKey("pk_dre_7f3a91c4")).resolves.toBeNull();
-    // The first-party page keeps working, since it needs no row.
-    await expect(findEmbedKey(INTERNAL_EMBED_KEY)).resolves.not.toBeNull();
   });
 });
 
@@ -143,12 +138,6 @@ describe("embedOriginAllowed", () => {
     expect(embedOriginAllowed(record, "https://attacker.example")).toBe(false);
   });
 
-  it("ties the internal key to the origin the request arrived at", async () => {
-    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
-    expect(embedOriginAllowed(record, "https://us.example", "https://us.example")).toBe(true);
-    expect(embedOriginAllowed(record, "https://them.example", "https://us.example")).toBe(false);
-    expect(embedOriginAllowed(record, "https://us.example")).toBe(false);
-  });
 
   it("is off in production for localhost", async () => {
     vi.stubEnv("NODE_ENV", "production");
@@ -207,9 +196,6 @@ describe("expiry", () => {
     expect(record?.expiresAt).toEqual(FUTURE);
   });
 
-  it("never expires the first-party key", async () => {
-    await expect(findEmbedKey(INTERNAL_EMBED_KEY)).resolves.toMatchObject({ expiresAt: null });
-  });
 });
 
 describe("hasExpired", () => {
@@ -245,39 +231,10 @@ describe("hasExpired", () => {
   });
 });
 
-describe("the first-party page behind a proxy", () => {
-  /**
-   * nginx may or may not set `x-forwarded-proto`, so the page and the route
-   * can disagree about the scheme while both mean this very host. Requiring
-   * them to match made the first-party page unable to start a call.
-   */
-  it("matches its own host whichever scheme each side inferred", async () => {
-    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
-    expect(embedOriginAllowed(record, "https://avatar.dr-e.com", "http://avatar.dr-e.com")).toBe(
-      true,
-    );
-    expect(embedOriginAllowed(record, "http://avatar.dr-e.com", "https://avatar.dr-e.com")).toBe(
-      true,
-    );
-  });
-
-  it("still refuses another host", async () => {
-    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
-    expect(embedOriginAllowed(record, "https://attacker.example", "https://avatar.dr-e.com")).toBe(
-      false,
-    );
-  });
-
-  it("still refuses another port on the same host", async () => {
-    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
-    expect(embedOriginAllowed(record, "http://localhost:3999", "http://localhost:3000")).toBe(
-      false,
-    );
-  });
-
-  it("refuses nonsense on either side", async () => {
-    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
-    expect(embedOriginAllowed(record, "not-an-origin", "https://avatar.dr-e.com")).toBe(false);
-    expect(embedOriginAllowed(record, "https://avatar.dr-e.com", "not-an-origin")).toBe(false);
+describe("with no usable key", () => {
+  it("lets nothing in at all", async () => {
+    // There is no first-party exception any more: no key, no entry.
+    await expect(findEmbedKey("pk_dre_7f3a91c4")).resolves.toBeNull();
+    await expect(findEmbedKey("internal_self")).resolves.toBeNull();
   });
 });

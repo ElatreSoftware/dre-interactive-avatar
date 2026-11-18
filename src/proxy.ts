@@ -18,8 +18,50 @@ import { isValidOriginPattern } from "@/embed/originMatch";
  * that ever stops being true.
  */
 export const config = {
-  matcher: "/embed/:path*",
+  matcher: ["/", "/embed/:path*"],
 };
+
+/**
+ * The host's own page is not a way in.
+ *
+ * Answered here rather than by a page because a page cannot set a status
+ * code, and a 200 saying "unauthorized" is a lie to everything that reads
+ * status codes — monitors, crawlers, the next engineer's `curl`.
+ */
+const UNAUTHORIZED_BODY = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>401 Unauthorized</title>
+    <style>
+      body { font: 16px/1.6 system-ui, sans-serif; margin: 0; min-height: 100dvh;
+             display: grid; place-items: center; background: #09053a; color: #fff; }
+      main { max-width: 36ch; padding: 32px; text-align: center; }
+      h1 { font-size: 1.25rem; margin: 0 0 0.5em; }
+      p { margin: 0; opacity: 0.7; font-size: 0.95rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 style="font-size: 1.5rem; font-weight: bold;"> Sorry, You are unauthorized to access this page</h1>
+    </main>
+  </body>
+</html>
+`;
+
+function unauthorized(): NextResponse {
+  return new NextResponse(UNAUTHORIZED_BODY, {
+    status: 401,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      // Nothing here is framable either.
+      "content-security-policy": "frame-ancestors 'none'",
+    },
+  });
+}
 
 const DEV_ANCESTORS = ["http://localhost:*", "http://127.0.0.1:*"];
 
@@ -30,13 +72,14 @@ async function frameAncestors(embedKey: string | undefined): Promise<string> {
   if (!record) return "'none'";
 
   const origins = record.allowedOrigins.filter(isValidOriginPattern);
-  if (record.internal) origins.push("'self'");
   if (process.env.NODE_ENV !== "production") origins.push(...DEV_ANCESTORS);
 
   return origins.length > 0 ? origins.join(" ") : "'none'";
 }
 
 export async function proxy(request: NextRequest): Promise<NextResponse> {
+  if (request.nextUrl.pathname === "/") return unauthorized();
+
   const response = NextResponse.next();
 
   // "/embed/<key>" — segments[0] is "" because the path has a leading slash.

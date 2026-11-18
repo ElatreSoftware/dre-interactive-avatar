@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { originFromHeaders, requestOrigin } from "@/embed/requestOrigin";
+import { originFromHeaders } from "@/embed/requestOrigin";
 
 function headers(values: Record<string, string>) {
   return {
@@ -79,11 +79,3 @@ describe("originFromHeaders", () => {
   });
 });
 
-describe("requestOrigin", () => {
-  it("reads a real Request the same way", () => {
-    const request = new Request("http://127.0.0.1:3000/api/avatar/session", {
-      headers: { host: "avatar.dr-e.com", "x-forwarded-proto": "https" },
-    });
-    expect(requestOrigin(request)).toBe("https://avatar.dr-e.com");
-  });
-});

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { originAllowed, parseOrigin } from "./originMatch";
+import { originAllowed } from "./originMatch";
 
 /**
  * The embed key registry, read from the database.
@@ -15,8 +15,6 @@ import { originAllowed, parseOrigin } from "./originMatch";
  * restart, which is what the file-backed version demanded.
  */
 
-export const INTERNAL_EMBED_KEY = "internal_self";
-
 const CACHE_TTL_MS = 30_000;
 
 export interface EmbedKeyRecord {
@@ -30,8 +28,6 @@ export interface EmbedKeyRecord {
   expiresAt: Date | null;
   /** Calls allowed at once. Null means no limit. */
   maxConcurrentSessions: number | null;
-  /** True for the reserved key our own first-party page uses. */
-  internal: boolean;
 }
 
 interface Cache {
@@ -41,24 +37,6 @@ interface Cache {
 
 let cache: Cache | null = null;
 let inFlight: Promise<Cache> | null = null;
-
-/**
- * The reserved key our own `/` page embeds with, so the session route has one
- * authorisation path instead of an "embedded" branch and a "not embedded"
- * branch. It is not a customer, so it is not a row.
- */
-function internalRecord(): EmbedKeyRecord {
-  return {
-    key: INTERNAL_EMBED_KEY,
-    name: "First-party page",
-    enabled: true,
-    avatarId: process.env.NEXT_PUBLIC_AVATAR_ID ?? "",
-    allowedOrigins: [],
-    expiresAt: null,
-    maxConcurrentSessions: null,
-    internal: true,
-  };
-}
 
 function toRecord(row: {
   key: string;
@@ -84,7 +62,6 @@ function toRecord(row: {
     ...(variables ? { dynamicVariables: variables } : {}),
     expiresAt: row.expiresAt,
     maxConcurrentSessions: row.maxConcurrentSessions,
-    internal: false,
   };
 }
 
@@ -92,8 +69,7 @@ async function load(): Promise<Cache> {
   const rows = await prisma.embedKey.findMany({ where: { enabled: true } });
 
   const byKey = new Map<string, EmbedKeyRecord>();
-  for (const row of rows) byKey.set(row.key, toRecord(row as any));
-  byKey.set(INTERNAL_EMBED_KEY, internalRecord());
+  for (const row of rows) byKey.set(row.key, toRecord(row));
 
   return { loadedAt: Date.now(), byKey };
 }
@@ -118,7 +94,9 @@ async function getCache(): Promise<Cache> {
     // cache if we have one, and fail closed only when we have nothing.
     console.error("[embed] could not load the key registry:", error);
     if (cache) return cache;
-    return { loadedAt: 0, byKey: new Map([[INTERNAL_EMBED_KEY, internalRecord()]]) };
+    // Nothing cached and nothing to read: no key is usable, so nothing can
+    // embed. Failing closed is the only safe direction.
+    return { loadedAt: 0, byKey: new Map() };
   }
 }
 
@@ -142,28 +120,10 @@ export async function findEmbedKey(key: string | undefined | null): Promise<Embe
 /**
  * Whether `origin` may embed `record`.
  *
- * The internal key trusts `selfOrigin` — the origin this very request arrived
- * at — because our own page is served from it and nothing else is.
- *
- * Host and port, deliberately not scheme. Behind a TLS-terminating proxy the
- * page and the route can disagree about `http` versus `https` depending on
- * which forwarded headers the proxy sets, and that disagreement stopped the
- * first-party page starting a call at all. The scheme adds no protection
- * here: both sides are our own host, and the grant naming it is signed with
- * our own secret.
+ * There is no longer a first-party exception: this service is only reachable
+ * through an embed, by a key, from an origin that key names.
  */
-export function embedOriginAllowed(
-  record: EmbedKeyRecord,
-  origin: string,
-  selfOrigin?: string,
-): boolean {
-  if (record.internal) {
-    if (!selfOrigin) return false;
-    const claimed = parseOrigin(origin);
-    const self = parseOrigin(selfOrigin);
-    if (!claimed || !self) return false;
-    return claimed.hostname === self.hostname && claimed.port === self.port;
-  }
+export function embedOriginAllowed(record: EmbedKeyRecord, origin: string): boolean {
   return originAllowed(origin, record.allowedOrigins);
 }
 

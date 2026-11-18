@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { GRANT_HEADER, signGrant, verifyGrant } from "@/embed/grant";
-import { requestOrigin } from "@/embed/requestOrigin";
 import { embedOriginAllowed, findEmbedKey } from "@/embed/registry";
 import { getGrantSecret } from "@/lib/env";
 
@@ -52,11 +51,7 @@ export async function POST(request: Request) {
 
   // Re-checked on every renewal, so revoking an origin takes effect within the
   // grant's lifetime rather than at the next page load.
-  // From the forwarded headers, not `request.url`: behind TLS termination
-  // those disagree, and this is compared against an origin the page derived
-  // the same way.
-  const selfOrigin = requestOrigin(request) ?? undefined;
-  if (!embedOriginAllowed(record, parentOrigin, selfOrigin)) {
+  if (!embedOriginAllowed(record, parentOrigin)) {
     return NextResponse.json({ error: "Origin is not allowed." }, { status: 403 });
   }
 

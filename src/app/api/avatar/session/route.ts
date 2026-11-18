@@ -4,7 +4,6 @@ import { z } from "zod";
 import { checkConcurrency, claimSession } from "@/embed/concurrency";
 import { GRANT_HEADER, verifyGrant } from "@/embed/grant";
 import { sessionRateLimiter } from "@/embed/rateLimit";
-import { requestOrigin } from "@/embed/requestOrigin";
 import { embedOriginAllowed, findEmbedKey, type EmbedKeyRecord } from "@/embed/registry";
 import { getGrantSecret, getServerEnv } from "@/lib/env";
 
@@ -56,13 +55,9 @@ async function authorize(request: Request): Promise<Caller | null> {
   const record = await findEmbedKey(result.payload.embedKey);
   if (!record) return null;
 
-  // From the forwarded headers, not `request.url`: behind TLS termination
-  // those disagree, and this is compared against an origin the page derived
-  // the same way.
-  const selfOrigin = requestOrigin(request) ?? undefined;
   // Re-checked here, not just when the grant was issued, so removing an origin
   // from the allowlist takes effect inside the grant's lifetime.
-  if (!embedOriginAllowed(record, result.payload.parentOrigin, selfOrigin)) {
+  if (!embedOriginAllowed(record, result.payload.parentOrigin)) {
     console.warn(`[avatar/session] refused a session: origin ${result.payload.parentOrigin}`);
     return null;
   }
@@ -143,17 +138,12 @@ export async function POST(request: Request) {
     return fail(429, "All available lines are busy. Try again in a moment.");
   }
 
-  // The registry wins over the body for everything that costs money or shapes
-  // the conversation. The internal key has no avatar of its own, so the
-  // first-party page may still name one.
-  const avatarId = caller.record.internal
-    ? (caller.record.avatarId || parsed.data.avatarId || env.LIVEAVATAR_DEFAULT_AVATAR_ID)
-    : caller.record.avatarId;
+  // The registry decides everything that costs money or shapes the
+  // conversation. A caller does not get to describe itself.
+  const avatarId = caller.record.avatarId || env.LIVEAVATAR_DEFAULT_AVATAR_ID;
   if (!avatarId) return fail(400, "No avatar id supplied or configured.");
 
-  const dynamicVariables = caller.record.internal
-    ? parsed.data.dynamicVariables
-    : caller.record.dynamicVariables;
+  const dynamicVariables = caller.record.dynamicVariables;
 
   let upstream: Response;
   try {

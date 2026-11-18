@@ -1,45 +1,24 @@
-import { headers } from "next/headers";
-import { InteractiveAvatar } from "@/components/avatar";
-import { AvatarProvider } from "@/avatar";
-import { signGrant } from "@/embed/grant";
-import { INTERNAL_EMBED_KEY } from "@/embed/registry";
-import { originFromHeaders } from "@/embed/requestOrigin";
-import { getGrantSecret } from "@/lib/env";
+import type { Metadata } from "next";
 
-export const dynamic = "force-dynamic";
+export const metadata: Metadata = {
+  title: "401 Unauthorized",
+  robots: { index: false, follow: false },
+};
 
 /**
- * The first-party page.
+ * A fallback, and only that.
  *
- * It embeds with a reserved key and a grant of its own, so the session route
- * has one authorisation path rather than an "embedded" branch and a
- * "not embedded" branch — the second of which would be the under-tested one.
+ * `src/proxy.ts` answers `/` with a real 401 before this renders, because a
+ * page cannot set a status code. This exists so the message is still right if
+ * the proxy is ever bypassed — a 200 would be worse than useless, but a blank
+ * screen would be worse still.
  */
-export default async function HomePage() {
-  const avatarId = process.env.NEXT_PUBLIC_AVATAR_ID ?? "";
-
-  const headerList = await headers();
-  // Must match what the session route computes, or this page cannot start a
-  // call behind a TLS-terminating proxy — see src/embed/requestOrigin.ts.
-  const selfOrigin = originFromHeaders(headerList) ?? "http://localhost:3000";
-  const grant = signGrant(
-    { embedKey: INTERNAL_EMBED_KEY, parentOrigin: selfOrigin },
-    getGrantSecret(),
-  );
-
+export default function HomePage() {
   return (
-    <main className="min-h-dvh">
-      {/* The widget is the whole page: a corner button that opens the call. */}
-      <AvatarProvider
-        config={{
-          avatarId,
-          embedKey: INTERNAL_EMBED_KEY,
-          grant,
-          greetingPrompt: "Hello",
-        }}
-      >
-        <InteractiveAvatar title="Dr E" />
-      </AvatarProvider>
+    <main className="grid min-h-dvh place-items-center bg-brand-950 p-8 text-center text-white">
+      <div className="max-w-[36ch]">
+        <h1 className="mb-2 text-xl font-semibold">You are unauthorized to access</h1>
+      </div>
     </main>
   );
 }

@@ -176,7 +176,10 @@ Key changes take effect within thirty seconds without a restart. **Changes to
 ## Check it works
 
 ```bash
-curl -sI "https://widget.example.com/embed/<key>?o=https%3A%2F%2Facme.example" | head -3
+# Note: a plain curl gets a 404 — it is not a frame, and that is the point.
+# Add the header a browser sends when it is one.
+curl -sI -H "Sec-Fetch-Dest: iframe" \
+  "https://widget.example.com/embed/<key>?o=https%3A%2F%2Facme.example" | head -3
 curl -s -o /dev/null -w "%{http_code}\n" https://widget.example.com/embed.js
 npm run footprints:check
 npm run embed:keys
@@ -196,4 +199,6 @@ different `DATABASE_URL` than the one you added the key to.
 | Widget loads, call never starts | Check the server log for `[avatar/session]`. A 4xx from LiveAvatar is nearly always configuration: wrong avatar id, or an ElevenLabs agent that is not PCM 24000 Hz. |
 | "This page hasn't allowed microphone access" | The embedding page's iframe tag is missing `allow="microphone"`. Our loader sets it; a hand-written tag may not. |
 | Everything works locally, nothing works in production | `NODE_ENV` is not `production`, so the localhost allowance is masking a missing origin — or the reverse, and a real origin was never added. |
-| `{"error":"This page is not allowed to start a session."}` on your own domain | The first-party page signs a grant for its own origin and the session route checks it. Both now derive that origin from the forwarded headers and compare host and port only, so a proxy that does or does not set `x-forwarded-proto` works either way. If you still see it, the host the page saw and the host the route saw genuinely differ — check `proxy_set_header Host $host`. |
+| `/` returns 401 | Intended. There is no first-party route into a call; embed it. A monitor pointed at `/` will report the site as down — point it at `/embed.js`, which is a 200. |
+| `/embed/<key>` 404s in a browser tab | Intended. It only serves inside a frame. |
+| `{"error":"This page is not allowed to start a session."}` | The first-party page signs a grant for its own origin and the session route checks it. Both now derive that origin from the forwarded headers and compare host and port only, so a proxy that does or does not set `x-forwarded-proto` works either way. If you still see it, the host the page saw and the host the route saw genuinely differ — check `proxy_set_header Host $host`. |

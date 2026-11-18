@@ -8,7 +8,10 @@
  *   pnpm embed:keys -- --key pk_dre_... --expires 2027-01-01
  *   pnpm embed:keys -- --key pk_dre_... --expires never
  *   pnpm embed:keys -- --key pk_dre_... --max-concurrent 5     (0 = unlimited)
+ *   pnpm embed:keys -- --key pk_dre_... --add-origin https://new.example
+ *   pnpm embed:keys -- --key pk_dre_... --remove-origin https://old.example
  */
+import { isValidOriginPattern } from "../src/embed/originMatch.ts";
 import { prisma } from "./db.mjs";
 
 const args = process.argv.slice(2);
@@ -16,6 +19,14 @@ const args = process.argv.slice(2);
 function flag(name) {
   const index = args.indexOf(`--${name}`);
   return index === -1 ? null : args[index + 1];
+}
+
+function flags(name) {
+  const values = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === `--${name}` && args[i + 1]) values.push(args[i + 1]);
+  }
+  return values;
 }
 
 for (const [name, enabled] of [
@@ -50,6 +61,43 @@ if (target) {
       }
       data.expiresAt = when;
     }
+  }
+
+  const added = flags("add-origin");
+  const removed = flags("remove-origin");
+
+  if (added.length > 0 || removed.length > 0) {
+    for (const origin of [...added, ...removed]) {
+      if (isValidOriginPattern(origin)) continue;
+      console.error(
+        `✗ "${origin}" is not a usable origin.\n` +
+          '  Expected scheme://host[:port], with at most one leading "*." label.\n' +
+          "  Note http://localhost:5500 and http://127.0.0.1:5500 are different origins.",
+      );
+      await prisma.$disconnect();
+      process.exit(1);
+    }
+
+    const current = await prisma.embedKey.findUnique({
+      where: { key: target },
+      select: { allowedOrigins: true },
+    });
+    if (!current) {
+      console.error(`✗ No key "${target}".`);
+      await prisma.$disconnect();
+      process.exit(1);
+    }
+
+    const next = current.allowedOrigins
+      .filter((origin) => !removed.includes(origin))
+      .concat(added.filter((origin) => !current.allowedOrigins.includes(origin)));
+
+    if (next.length === 0) {
+      console.error("✗ That would leave the key with no origins, so nothing could embed it.");
+      await prisma.$disconnect();
+      process.exit(1);
+    }
+    data.allowedOrigins = next;
   }
 
   const concurrent = flag("max-concurrent");

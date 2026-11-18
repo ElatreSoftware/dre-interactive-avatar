@@ -13,6 +13,25 @@ Put the assistant on your site with one script tag.
 That is the whole integration. A small round button appears in the corner;
 clicking it asks for the microphone and then opens the call.
 
+## There is only one way in
+
+The widget runs embedded, with a key, on an origin that key names. Nothing
+else works, by design:
+
+- **The host's own page** answers **401** with a short message. It is served
+  from `src/proxy.ts` rather than a page, because a page cannot set a status
+  code, and a 200 saying "unauthorized" misleads every monitor and crawler
+  that reads one.
+- **Opening `/embed/<key>` in a tab** is refused with a 404. The browser sends
+  `Sec-Fetch-Dest: document` for a top-level navigation and `iframe` for a
+  frame, and that header cannot be set by script. A public embed key pasted
+  into an address bar used to load a working, billable call.
+
+That second check is a real gate for browsers and a speed bump for everything
+else: a scripted caller can send any header it likes, but it has no browser to
+run a call in, and still has to get past the key, the allowlist, the signed
+grant and the rate limiter to spend anything.
+
 ## Requirements
 
 **Your page must be served over HTTPS.** Browsers refuse microphone access to
@@ -130,17 +149,48 @@ Live calls are tracked in the `ActiveSession` table, written when a session is
 minted — not derived from footprints, so the limit still holds with telemetry
 switched off. A slot is released when the call reports that it ended.
 
-The awkward case is a browser that crashes, loses power or is force-quit: it
-never says goodbye. Those slots are reclaimed after **ten minutes** without a
-sign of life, which is also the longest a customer can be short a line through
-no fault of their own. Every footprint event from a call counts as a sign of
-life, so with `FOOTPRINTS_ENABLED=false` a slot is held for the full ten
-minutes rather than released at the end of the call.
+#### How a line gets freed
+
+Three ways, in order of how quickly they work:
+
+1. **The call ends** — the visitor presses End. The `session_ended` footprint
+   closes the row immediately.
+2. **The tab closes without ending the call.** The common case: nobody presses
+   End, they just close the tab. `pagehide` reports the ending and sends it
+   with `sendBeacon`, which survives unload where a `fetch` is cancelled. The
+   line is freed at once, same as (1).
+3. **Nothing is heard again** — the browser crashed, the lid closed, the
+   network went. Nothing can report that, so those rows are reclaimed after
+   **ten minutes** without a sign of life.
+4. **It is simply too old.** A row older than **an hour** is closed whatever
+   its last event said. The quiet check in (3) trusts a stream of events, and
+   anything stuck — a page left open in a background tab, a loop that keeps
+   reporting — can keep that stream alive indefinitely and hold a line
+   forever. Vendor sessions have their own maximum duration well under an
+   hour, so an hour-old row is not a call any more. `SESSION_MAX_AGE_MINUTES`
+   changes it.
+
+Ten minutes is therefore the longest a customer can be short a line through no
+fault of their own. The sweep runs when the next session is requested, so the
+next caller triggers the cleanup and is then let through: nobody waits on a
+timer, only on their own next attempt.
+
+**With `FOOTPRINTS_ENABLED=false`, only (3) applies.** Endings travel as
+footprints, so with telemetry off nothing reports them and every line is held
+the full ten minutes. Worse, `lastSeenAt` is only refreshed by arriving
+events, so a call lasting longer than ten minutes looks dead while it is still
+running. If you set a concurrency limit, leave footprints on.
 
 **No restart.** Keys are cached for thirty seconds, so issuing, changing or
 disabling one takes effect on its own within that window. If the database is
 briefly unreachable the last known keys keep working; with nothing cached it
 fails closed, and the first-party page keeps running because it needs no row.
+
+**`localhost` and `127.0.0.1` are different origins**, as are `http` and
+`https`, and two ports on the same host. A browser compares them as strings;
+so does this. Serving a page at `http://localhost:5500` when the key lists
+`http://127.0.0.1:5500` gets a 404, and the server log says which origin was
+refused and what is allowed.
 
 Origin patterns are exact, with one optional leading `*.` label.
 `https://*.acme.example` covers `www.acme.example` and `eu.shop.acme.example`,

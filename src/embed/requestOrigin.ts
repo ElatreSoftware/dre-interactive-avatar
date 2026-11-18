@@ -46,8 +46,3 @@ export function originFromHeaders(headers: HeaderReader, fallbackUrl?: string): 
   if (!host) return null;
   return `${proto.toLowerCase()}://${host.toLowerCase()}`;
 }
-
-/** The same thing, for a route handler that has the whole `Request`. */
-export function requestOrigin(request: Request): string | null {
-  return originFromHeaders(request.headers, request.url);
-}
