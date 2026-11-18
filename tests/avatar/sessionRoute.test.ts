@@ -431,3 +431,49 @@ describe("concurrent call limits", () => {
     expect(body).not.toMatch(/pk_|limit|concurrent/i);
   });
 });
+
+describe("behind a TLS-terminating proxy", () => {
+  /**
+   * The first-party page signs a grant for its own origin, and this route
+   * checks it. nginx talks to the app over plain HTTP, so `request.url` says
+   * `http://` while the page saw `https://`. Deriving the two differently
+   * made every first-party call fail with "This page is not allowed to start
+   * a session" the moment the app went behind TLS.
+   */
+  function proxiedRequest(grant: string): Request {
+    return new Request("http://127.0.0.1:3000/api/avatar/session", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        host: "avatar.dr-e.com",
+        "x-forwarded-proto": "https",
+        [GRANT_HEADER]: grant,
+      },
+      body: "{}",
+    });
+  }
+
+  it("accepts the first-party page's own grant", async () => {
+    mockUpstream(200, {
+      code: 100,
+      message: "ok",
+      data: { session_id: "sess-1", session_token: "tok-1" },
+    });
+
+    const grant = signGrant(
+      { embedKey: INTERNAL_EMBED_KEY, parentOrigin: "https://avatar.dr-e.com" },
+      GRANT_SECRET,
+    );
+
+    expect((await (await importRoute()).POST(proxiedRequest(grant))).status).toBe(200);
+  });
+
+  it("still refuses a grant for somewhere else entirely", async () => {
+    const grant = signGrant(
+      { embedKey: INTERNAL_EMBED_KEY, parentOrigin: "https://attacker.example" },
+      GRANT_SECRET,
+    );
+
+    expect((await (await importRoute()).POST(proxiedRequest(grant))).status).toBe(403);
+  });
+});

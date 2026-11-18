@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { signGrant } from "@/embed/grant";
 import { embedOriginAllowed, findEmbedKey } from "@/embed/registry";
 import { parseOrigin, serializeOrigin } from "@/embed/originMatch";
+import { originFromHeaders } from "@/embed/requestOrigin";
 import { getGrantSecret } from "@/lib/env";
 import { EmbedWidget } from "./EmbedWidget";
 
@@ -39,9 +40,7 @@ export default async function EmbedPage({ params, searchParams }: PageProps) {
   const headerList = await headers();
 
   const claimed = typeof query.o === "string" ? query.o : undefined;
-  const host = headerList.get("host");
-  const proto = headerList.get("x-forwarded-proto") ?? "https";
-  const selfOrigin = host ? `${proto}://${host}` : undefined;
+  const selfOrigin = originFromHeaders(headerList) ?? undefined;
 
   // Opened directly rather than framed: treat our own origin as the parent, so
   // `/embed/<key>` is debuggable in a browser tab.

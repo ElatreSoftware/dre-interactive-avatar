@@ -3,6 +3,7 @@ import { InteractiveAvatar } from "@/components/avatar";
 import { AvatarProvider } from "@/avatar";
 import { signGrant } from "@/embed/grant";
 import { INTERNAL_EMBED_KEY } from "@/embed/registry";
+import { originFromHeaders } from "@/embed/requestOrigin";
 import { getGrantSecret } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +19,11 @@ export default async function HomePage() {
   const avatarId = process.env.NEXT_PUBLIC_AVATAR_ID ?? "";
 
   const headerList = await headers();
-  const host = headerList.get("host") ?? "localhost:3000";
-  const proto = headerList.get("x-forwarded-proto") ?? "http";
+  // Must match what the session route computes, or this page cannot start a
+  // call behind a TLS-terminating proxy — see src/embed/requestOrigin.ts.
+  const selfOrigin = originFromHeaders(headerList) ?? "http://localhost:3000";
   const grant = signGrant(
-    { embedKey: INTERNAL_EMBED_KEY, parentOrigin: `${proto}://${host}` },
+    { embedKey: INTERNAL_EMBED_KEY, parentOrigin: selfOrigin },
     getGrantSecret(),
   );
 

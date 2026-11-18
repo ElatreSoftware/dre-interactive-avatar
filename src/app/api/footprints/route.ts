@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { GRANT_HEADER, verifyGrant } from "@/embed/grant";
 import { linkSession, releaseSession, touchSession } from "@/embed/concurrency";
 import { createRateLimiter } from "@/embed/rateLimit";
+import { requestOrigin } from "@/embed/requestOrigin";
 import { embedOriginAllowed, findEmbedKey } from "@/embed/registry";
 import { getGrantSecret } from "@/lib/env";
 import { getFootprintSink } from "@/telemetry/store";
@@ -128,8 +129,10 @@ export async function POST(request: Request) {
   const record = await findEmbedKey(grant.payload.embedKey);
   if (!record) return NextResponse.json({ error: "Invalid grant." }, { status: 403 });
 
-  const url = new URL(request.url);
-  const selfOrigin = `${url.protocol}//${url.host}`;
+  // From the forwarded headers, not `request.url`: behind TLS termination
+  // those disagree, and this is compared against an origin the page derived
+  // the same way.
+  const selfOrigin = requestOrigin(request) ?? undefined;
   if (!embedOriginAllowed(record, grant.payload.parentOrigin, selfOrigin)) {
     return NextResponse.json({ error: "Origin is not allowed." }, { status: 403 });
   }

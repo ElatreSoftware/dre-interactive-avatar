@@ -244,3 +244,40 @@ describe("hasExpired", () => {
     expect(hasExpired(record, Number.MAX_SAFE_INTEGER)).toBe(false);
   });
 });
+
+describe("the first-party page behind a proxy", () => {
+  /**
+   * nginx may or may not set `x-forwarded-proto`, so the page and the route
+   * can disagree about the scheme while both mean this very host. Requiring
+   * them to match made the first-party page unable to start a call.
+   */
+  it("matches its own host whichever scheme each side inferred", async () => {
+    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
+    expect(embedOriginAllowed(record, "https://avatar.dr-e.com", "http://avatar.dr-e.com")).toBe(
+      true,
+    );
+    expect(embedOriginAllowed(record, "http://avatar.dr-e.com", "https://avatar.dr-e.com")).toBe(
+      true,
+    );
+  });
+
+  it("still refuses another host", async () => {
+    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
+    expect(embedOriginAllowed(record, "https://attacker.example", "https://avatar.dr-e.com")).toBe(
+      false,
+    );
+  });
+
+  it("still refuses another port on the same host", async () => {
+    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
+    expect(embedOriginAllowed(record, "http://localhost:3999", "http://localhost:3000")).toBe(
+      false,
+    );
+  });
+
+  it("refuses nonsense on either side", async () => {
+    const record = (await findEmbedKey(INTERNAL_EMBED_KEY))!;
+    expect(embedOriginAllowed(record, "not-an-origin", "https://avatar.dr-e.com")).toBe(false);
+    expect(embedOriginAllowed(record, "https://avatar.dr-e.com", "not-an-origin")).toBe(false);
+  });
+});

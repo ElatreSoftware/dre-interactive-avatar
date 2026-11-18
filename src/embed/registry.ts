@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { originAllowed } from "./originMatch";
+import { originAllowed, parseOrigin } from "./originMatch";
 
 /**
  * The embed key registry, read from the database.
@@ -92,7 +92,7 @@ async function load(): Promise<Cache> {
   const rows = await prisma.embedKey.findMany({ where: { enabled: true } });
 
   const byKey = new Map<string, EmbedKeyRecord>();
-  for (const row of rows) byKey.set(row.key, toRecord(row));
+  for (const row of rows) byKey.set(row.key, toRecord(row as any));
   byKey.set(INTERNAL_EMBED_KEY, internalRecord());
 
   return { loadedAt: Date.now(), byKey };
@@ -144,13 +144,26 @@ export async function findEmbedKey(key: string | undefined | null): Promise<Embe
  *
  * The internal key trusts `selfOrigin` — the origin this very request arrived
  * at — because our own page is served from it and nothing else is.
+ *
+ * Host and port, deliberately not scheme. Behind a TLS-terminating proxy the
+ * page and the route can disagree about `http` versus `https` depending on
+ * which forwarded headers the proxy sets, and that disagreement stopped the
+ * first-party page starting a call at all. The scheme adds no protection
+ * here: both sides are our own host, and the grant naming it is signed with
+ * our own secret.
  */
 export function embedOriginAllowed(
   record: EmbedKeyRecord,
   origin: string,
   selfOrigin?: string,
 ): boolean {
-  if (record.internal) return Boolean(selfOrigin) && origin === selfOrigin;
+  if (record.internal) {
+    if (!selfOrigin) return false;
+    const claimed = parseOrigin(origin);
+    const self = parseOrigin(selfOrigin);
+    if (!claimed || !self) return false;
+    return claimed.hostname === self.hostname && claimed.port === self.port;
+  }
   return originAllowed(origin, record.allowedOrigins);
 }
 
