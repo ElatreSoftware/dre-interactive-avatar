@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Brand. #09053A is the anchor; the rest are tints of it for surfaces,
+     borders and muted text, so the whole UI reads as one family. */
+  --color-brand-50: #f2f3f9;
+  --color-brand-100: #e3e5f1;
+  --color-brand-200: #c4c8e0;
+  --color-brand-300: #969dc6;
+  --color-brand-400: #6670a6;
+  --color-brand-500: #3f4a89;
+  --color-brand-600: #272f6b;
+  --color-brand-700: #1a1f55;
+  --color-brand-800: #11114a;
+  --color-brand-900: #0c0941;
+  --color-brand-950: #09053a;
+
+  --color-surface: #ffffff;
+  --color-canvas: #f6f7fb;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-brand-950);
+}
+
+/* The call grows out of the launcher in the bottom-right corner, so the stage
+   reads as an expansion of the button rather than an unrelated panel dropping
+   in. Honoured only when the user allows motion. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes stage-in {
+    from {
+      opacity: 0;
+      transform: translate(6%, 10%) scale(0.86);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes stage-out {
+    from {
+      transform: none;
+      opacity: 1;
+    }
+    to {
+      transform: translate(6%, 10%) scale(0.86);
+      opacity: 0;
+    }
+  }
+  .animate-stage-in {
+    transform-origin: bottom right;
+    animation: stage-in 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* Back into the corner it came from, and held there so it does not flash
+     back to full size in the frame before the host collapses it. */
+  .animate-stage-out {
+    transform-origin: bottom right;
+    animation: stage-out 220ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  }
+}
+
+/*
+ * The embed document is painted over someone else's page, so it contributes no
+ * background of its own — only the widget's own surfaces are visible.
+ */
+body:has([data-embed-root]) {
+  background: transparent;
+}

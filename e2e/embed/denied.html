@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Not an allowed embedder</title>
+  </head>
+  <body>
+    <h1>Scraped key, wrong origin</h1>
+    <!--
+      Same key, served from an origin that is not on its allowlist. The browser
+      must refuse to render the framed document.
+    -->
+    <script src="__WIDGET_ORIGIN__/embed.js" data-embed-key="pk_e2e_allowed"></script>
+  </body>
+</html>

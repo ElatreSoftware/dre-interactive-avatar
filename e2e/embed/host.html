@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Acme Corp</title>
+    <style>
+      body { font: 16px/1.5 system-ui; margin: 0; padding: 40px; }
+      main { max-width: 40ch; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Acme Corp</h1>
+      <p>A customer's page. The widget is mounted by the one script tag below.</p>
+      <button id="open-from-host" type="button">Talk to us</button>
+    </main>
+
+    <script
+      src="__WIDGET_ORIGIN__/embed.js"
+      data-embed-key="pk_e2e_allowed"
+      data-position="bottom-right"
+      data-user-id="customer-42"
+    ></script>
+    <script>
+      document.getElementById("open-from-host").addEventListener("click", function () {
+        window.DreWidget.open();
+      });
+    </script>
+  </body>
+</html>

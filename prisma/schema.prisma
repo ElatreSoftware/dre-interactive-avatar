@@ -1,0 +1,139 @@
+// Everything this service stores lives here: who may embed the widget, and
+// what happened in each session. There is no configuration file and nothing
+// on disk to back up separately.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// A customer allowed to embed the widget.
+///
+/// The key itself is public — it ships in the customer's page source. What
+/// authorises is `allowedOrigins`, enforced by the browser through
+/// `frame-ancestors` and again when a session is minted.
+model EmbedKey {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  name      String
+  enabled   Boolean  @default(true)
+  avatarId  String
+
+  /// Exact origins, or one leading `*.` label: https://*.acme.example
+  allowedOrigins String[]
+
+  /// Values interpolated into the ElevenLabs agent prompt.
+  dynamicVariables Json?
+
+  /// When the key stops working. Null means it does not expire.
+  ///
+  /// Checked at lookup rather than when keys are loaded, so a key that
+  /// expires between cache refreshes stops working on time.
+  expiresAt DateTime?
+
+  /// How many calls this customer may have running at once. Null means no
+  /// limit. Sessions cost vendor credits, so this is a spend control as much
+  /// as a fairness one.
+  maxConcurrentSessions Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+/// One recorded event from one widget session.
+///
+/// Append-only in practice: rows are written once and deleted by retention,
+/// never updated.
+model Footprint {
+  id Int @id @default(autoincrement())
+
+  /// Schema version of `payload`, so a reader can tell what shape it is.
+  v Int @default(1)
+
+  /// Client-generated id, unique per event. Makes a replayed batch harmless.
+  eventId String @unique
+
+  /// Order within one widget session; survives out-of-order delivery.
+  seq Int
+
+  /// Our session id, from widget load — before any vendor session exists.
+  sessionKey String
+
+  /// The vendor's session id, once there is one.
+  avatarSessionId String?
+
+  type String
+
+  /// The event's own fields. Narrow columns would mean a migration for every
+  /// new event type; the envelope is columns, the payload is JSON.
+  payload Json
+
+  /// What the browser claimed.
+  clientTs DateTime
+
+  /// What the server observed. Use this one.
+  receivedAt DateTime @default(now())
+
+  /// From the verified grant, never from the request body.
+  ///
+  /// Deliberately not a foreign key. A footprint is an audit record of what
+  /// happened, and it has to outlive the key it happened under: with a
+  /// constraint here you cannot delete a customer without destroying or
+  /// rewriting their history, and historical events cannot be imported at all.
+  /// It records the key as it was, whether or not that row still exists.
+  embedKeyValue String
+  parentOrigin  String
+
+  /// Salted hash. The raw address is never stored.
+  ipHash    String
+  userAgent String
+
+  /// Retention sweeps by age; dashboards read one session or one customer.
+  @@index([receivedAt])
+  @@index([sessionKey, seq])
+  @@index([embedKeyValue, receivedAt])
+  @@index([type])
+}
+
+/// One call that has been paid for.
+///
+/// Written when a session is minted rather than derived from footprints:
+/// enforcement must not depend on telemetry being switched on, or on a
+/// browser having flushed its last batch.
+///
+/// Rows are closed, not deleted. `deletedAt` is what makes a row stop
+/// counting towards a customer's concurrent limit, and keeping the row means
+/// a finished call can still be looked at — when it started, when it ended,
+/// whether it ended or merely went quiet.
+model ActiveSession {
+  id String @id @default(cuid())
+
+  /// The vendor's session id, known at the moment it is minted.
+  avatarSessionId String @unique
+
+  /// Our widget session id. Filled in when the first footprint for this call
+  /// arrives, and what lets the end of a call release the slot.
+  sessionKey String?
+
+  embedKeyValue String
+
+  startedAt DateTime @default(now())
+
+  /// Refreshed as events arrive. A row no one has touched for a while is
+  /// assumed dead — a crashed tab cannot tell us it is gone.
+  lastSeenAt DateTime @default(now())
+
+  /// When the call stopped counting: it ended, or it went quiet for long
+  /// enough that we reclaimed the line. Null means it is still running.
+  deletedAt DateTime?
+
+  /// Counting live calls is the hot path, and it always filters on both.
+  @@index([embedKeyValue, deletedAt])
+  @@index([deletedAt, lastSeenAt])
+  @@index([sessionKey])
+}
