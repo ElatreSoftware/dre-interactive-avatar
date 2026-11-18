@@ -8,6 +8,9 @@ export default tseslint.config(
     ignores: [
       ".next/**",
       "node_modules/**",
+      // Third-party compiled output. It used to sit in node_modules, where it
+      // was ignored for free; vendoring it made it visible to every tool.
+      "vendor/**",
       "coverage/**",
       "playwright-report/**",
       "test-results/**",

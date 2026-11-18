@@ -1,0 +1,12 @@
+export declare const LIVEKIT_COMMAND_CHANNEL_TOPIC = "agent-control";
+export declare const LIVEKIT_SERVER_RESPONSE_CHANNEL_TOPIC = "agent-response";
+export declare const PROVIDER_API_URL: string;
+export declare const API_URL: string;
+export declare const PROXY_API_PREFIX: string;
+export declare const PROXY_WS_PREFIX: string;
+export declare const PROXY_ORIGIN: string;
+export declare const LIVEKIT_PREFIX: string;
+export declare function resolveProxyOrigin(override?: string): string;
+export declare function resolveApiUrl(override?: string, proxyOrigin?: string): string;
+export declare function resolveWebSocketUrl(providerUrl?: string, overrideBase?: string, proxyOrigin?: string): string | undefined;
+export declare function resolveLiveKitUrl(providerUrl?: string, overrideBase?: string, proxyOrigin?: string): string | undefined;

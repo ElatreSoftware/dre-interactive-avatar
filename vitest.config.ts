@@ -8,7 +8,7 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
       "@elatre/liveavatar-web-sdk": fileURLToPath(
-        new URL("./node_modules/@elatre/lib/index.esm.js", import.meta.url),
+        new URL("./vendor/liveavatar-web-sdk/lib/index.esm.js", import.meta.url),
       ),
     },
   },

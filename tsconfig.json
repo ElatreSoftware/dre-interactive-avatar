@@ -33,7 +33,7 @@
         "./src/*"
       ],
       "@elatre/liveavatar-web-sdk": [
-        "./node_modules/@elatre/lib/index.d.ts"
+        "./vendor/liveavatar-web-sdk/lib/index.d.ts"
       ]
     }
   },

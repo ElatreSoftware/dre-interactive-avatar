@@ -77,6 +77,7 @@ appends it locally.
 | `prisma/schema.prisma` | Embed keys and footprints. The only place anything is stored |
 | `src/lib/db.ts` | The Prisma client singleton |
 | `certs/` | AWS RDS CA bundle, for verified TLS to a managed database |
+| `vendor/liveavatar-web-sdk/` | The avatar SDK, vendored. Not installed by npm — aliased in `next.config.ts`, `tsconfig.json` and `vitest.config.ts` |
 
 ## Commands
 
@@ -93,6 +94,7 @@ pnpm db:up       pnpm db:migrate   pnpm db:studio   pnpm embed:keys
 
 - [Integration guide](docs/integration.md) — setup, props, hooks, interruption, theming
 - [Embedding guide](docs/embedding.md) — the script tag, embed keys, origin allowlists, operating the service
+- [Deployment](docs/deployment.md) — server setup, nginx, systemd, and what to check
 - [Footprints](docs/footprints.md) — what each session records, jq recipes, retention and privacy
 - [Live-session checklist](docs/live-session-checklist.md) — what to verify by hand
 - [SPEC.md](SPEC.md) · [tasks/plan.md](tasks/plan.md)
