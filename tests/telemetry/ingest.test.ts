@@ -319,7 +319,7 @@ describe("keeping the concurrent-session count honest", () => {
     expect(db.activeSessions[0]!.sessionKey).toBe("session-key-1");
   });
 
-  it("frees the slot when the call ends", async () => {
+  it("closes the slot when the call ends, keeping the record", async () => {
     seedActiveSession({
       avatarSessionId: "vendor-1",
       sessionKey: "session-key-1",
@@ -340,7 +340,8 @@ describe("keeping the concurrent-session count honest", () => {
       }),
     );
 
-    expect(db.activeSessions).toHaveLength(0);
+    expect(db.activeSessions).toHaveLength(1);
+    expect(db.activeSessions[0]!.deletedAt).toBeInstanceOf(Date);
   });
 
   it("counts an ordinary event as a sign of life", async () => {
@@ -358,7 +359,7 @@ describe("keeping the concurrent-session count honest", () => {
     expect(db.activeSessions[0]!.lastSeenAt.getTime()).toBeGreaterThan(before);
   });
 
-  it("does not resurrect a slot it just released", async () => {
+  it("does not resurrect a slot it just closed", async () => {
     seedActiveSession({
       avatarSessionId: "vendor-1",
       sessionKey: "session-key-1",
@@ -381,6 +382,7 @@ describe("keeping the concurrent-session count honest", () => {
       }),
     );
 
-    expect(db.activeSessions).toHaveLength(0);
+    // The earlier events in the batch must not re-open it.
+    expect(db.activeSessions[0]!.deletedAt).toBeInstanceOf(Date);
   });
 });

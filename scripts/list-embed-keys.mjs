@@ -82,7 +82,8 @@ if (keys.length === 0) {
   for (const key of keys) {
     const [sessions, live] = await Promise.all([
       prisma.footprint.count({ where: { embedKeyValue: key.key, type: "session_started" } }),
-      prisma.activeSession.count({ where: { embedKeyValue: key.key } }),
+      // Only calls still running; closed rows stay as history.
+      prisma.activeSession.count({ where: { embedKeyValue: key.key, deletedAt: null } }),
     ]);
 
     const expired = key.expiresAt !== null && key.expiresAt.getTime() <= Date.now();

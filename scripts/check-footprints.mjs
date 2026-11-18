@@ -69,7 +69,7 @@ try {
     notes.push(`${key.name} (${key.key}) ${gone ? "expired" : "expires"} ${when}.`);
   }
 
-  const live = await prisma.activeSession.count();
+  const live = await prisma.activeSession.count({ where: { deletedAt: null } });
   if (live > 0) notes.push(`${live} call(s) currently counted as live.`);
 
   // Retention runs from the ingest path, so a backlog means either nothing is

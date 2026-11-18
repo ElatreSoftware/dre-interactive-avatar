@@ -71,12 +71,31 @@ describe("stale sessions", () => {
    * nothing has touched for a while has to be reclaimed — otherwise a
    * customer's limit ratchets down to zero and stays there.
    */
-  it("reclaims a slot nothing has been heard from", async () => {
+  it("reclaims a slot nothing has been heard from, without losing the record", async () => {
     seedActiveSession({ avatarSessionId: "ghost", lastSeenAt: new Date(NOW - 11 * MINUTE) });
     seedActiveSession({ avatarSessionId: "live", lastSeenAt: new Date(NOW - MINUTE) });
 
     await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
-    expect(db.activeSessions.map((row) => row.avatarSessionId)).toEqual(["live"]);
+
+    // Both rows are still there; only one of them still counts.
+    expect(db.activeSessions).toHaveLength(2);
+    const ghost = db.activeSessions.find((row) => row.avatarSessionId === "ghost")!;
+    const live = db.activeSessions.find((row) => row.avatarSessionId === "live")!;
+    expect(ghost.deletedAt).toBeInstanceOf(Date);
+    expect(live.deletedAt).toBeNull();
+  });
+
+  it("does not close the same ghost twice", async () => {
+    const closedAt = new Date(NOW - 5 * MINUTE);
+    seedActiveSession({
+      avatarSessionId: "ghost",
+      lastSeenAt: new Date(NOW - 11 * MINUTE),
+      deletedAt: closedAt,
+    });
+
+    await countActiveSessions("pk_dre_7f3a91c4", NOW);
+    // The time it stopped counting is when it stopped counting, not now.
+    expect(db.activeSessions[0]!.deletedAt).toEqual(closedAt);
   });
 
   it("keeps a call that is still reporting in", async () => {
@@ -99,7 +118,44 @@ describe("the life of a slot", () => {
     expect(db.activeSessions[0]!.lastSeenAt.getTime()).toBeGreaterThanOrEqual(before);
 
     await releaseSession("widget-1");
-    expect(db.activeSessions).toHaveLength(0);
+    expect(db.activeSessions).toHaveLength(1);
+    expect(db.activeSessions[0]!.deletedAt).toBeInstanceOf(Date);
+  });
+
+  it("stops counting once released", async () => {
+    await claimSession("pk_dre_7f3a91c4", "vendor-1");
+    await linkSession("vendor-1", "widget-1");
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
+
+    await releaseSession("widget-1");
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(0);
+  });
+
+  it("does not revive a closed call when a late event arrives", async () => {
+    seedActiveSession({
+      avatarSessionId: "vendor-1",
+      sessionKey: "widget-1",
+      deletedAt: new Date(NOW - MINUTE),
+    });
+
+    // A batch flushed after the call ended must not take the line back.
+    await touchSession("widget-1");
+    expect(db.activeSessions[0]!.deletedAt).toBeInstanceOf(Date);
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(0);
+  });
+
+  it("keeps the record of a released call for later", async () => {
+    await claimSession("pk_dre_7f3a91c4", "vendor-1");
+    await linkSession("vendor-1", "widget-1");
+    await releaseSession("widget-1");
+
+    const [row] = db.activeSessions;
+    expect(row).toMatchObject({
+      avatarSessionId: "vendor-1",
+      sessionKey: "widget-1",
+      embedKeyValue: "pk_dre_7f3a91c4",
+    });
+    expect(row!.startedAt).toBeInstanceOf(Date);
   });
 
   it("claims the same vendor session only once", async () => {
@@ -111,7 +167,7 @@ describe("the life of a slot", () => {
   it("releases nothing for an unknown session", async () => {
     seedActiveSession({ avatarSessionId: "s1", sessionKey: "widget-1" });
     await releaseSession("widget-elsewhere");
-    expect(db.activeSessions).toHaveLength(1);
+    expect(db.activeSessions[0]!.deletedAt).toBeNull();
   });
 });
 

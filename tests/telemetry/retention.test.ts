@@ -164,3 +164,43 @@ describe("sweepIfDue", () => {
     expect(() => sweepIfDue(NOW)).not.toThrow();
   });
 });
+
+describe("closed call records", () => {
+  function sessionClosedDaysAgo(days: number | null, id: string) {
+    db.activeSessions.push({
+      avatarSessionId: id,
+      sessionKey: `widget-${id}`,
+      embedKeyValue: "pk_test",
+      startedAt: new Date(NOW - (days ?? 0) * DAY),
+      lastSeenAt: new Date(NOW - (days ?? 0) * DAY),
+      deletedAt: days === null ? null : new Date(NOW - days * DAY),
+    });
+  }
+
+  it("goes on the same clock as the footprints", async () => {
+    sessionClosedDaysAgo(120, "old");
+    sessionClosedDaysAgo(10, "recent");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await pruneFootprints(NOW);
+    expect(db.activeSessions.map((row) => row.avatarSessionId)).toEqual(["recent"]);
+  });
+
+  it("never removes a call that is still running, however long it has run", async () => {
+    // Null `deletedAt` means live. A marathon call is not an expired record.
+    sessionClosedDaysAgo(null, "still-going");
+    db.activeSessions[0]!.startedAt = new Date(NOW - 365 * DAY);
+
+    await pruneFootprints(NOW);
+    expect(db.activeSessions).toHaveLength(1);
+  });
+
+  it("counts them in what it reports removing", async () => {
+    sessionClosedDaysAgo(120, "old");
+    footprintAgedDays(120, "old-event");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(pruneFootprints(NOW)).resolves.toBe(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("closed call"));
+  });
+});
