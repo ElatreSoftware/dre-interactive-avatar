@@ -77,7 +77,7 @@ async function connect() {
 beforeEach(() => {
   FakeSession.last = null;
   stubSessionEndpoint();
-  vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => { });
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -110,7 +110,7 @@ describe("useSession", () => {
     const session = await connect();
     expect(session.config).toEqual({
       apiUrl: window.location.origin,
-      livekitUrl: "wss://dev.rcmgen.ai",
+      livekitUrl: "wss://avatar.dr-e.com",
       voiceChat: { defaultMuted: false },
       autoKeepAlive: false,
     });
@@ -343,7 +343,7 @@ describe("interruption", () => {
 
 describe("hook guards", () => {
   it("throws a helpful error outside the provider", () => {
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => { });
     expect(() => render(<Probe />)).toThrow(/must be used inside <AvatarProvider>/);
   });
 });

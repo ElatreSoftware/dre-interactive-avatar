@@ -2,12 +2,12 @@
 // Leave proxyOrigin empty to call LiveAvatar directly.
 // Set it to your Nginx origin, with no path, to send API, session WebSocket,
 // and LiveKit signaling through that server.
-const proxyOrigin = "https://dev.rcmgen.ai";
+const proxyOrigin = "https://avatar.dr-e.com";
 const providerApiUrl = "";
 const apiPrefix = "/liveavatar";
 const wsPrefix = "/liveavatar-ws";
 const livekitPrefix = "/livekit";
-const livekitUrl = "wss://dev.rcmgen.ai/livekit";
+const livekitUrl = "wss://avatar.dr-e.com/livekit";
 
 function stripTrailingSlash(value) {
     return String(value).replace(/\/+$/, "");

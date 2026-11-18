@@ -58,8 +58,8 @@ export type SessionFactory = (
 ) => ElevenLabsAgentSession;
 
 // The SDK appends the livekit_url host as a path segment; /v1/sessions/start
-// rewrites that host to "livekit", giving wss://dev.rcmgen.ai/livekit/rtc.
-export const LIVEKIT_URL = "wss://dev.rcmgen.ai";
+// rewrites that host to "livekit", giving wss://avatar.dr-e.com/livekit/rtc.
+export const LIVEKIT_URL = "wss://avatar.dr-e.com/livekit";
 
 const defaultSessionFactory: SessionFactory = (credentials, { startMuted }) =>
   new ElevenLabsAgentSession(credentials.sessionToken, {
