@@ -62,6 +62,10 @@ async function run(request: Request) {
 
   try {
     const summary = await reconcileSessions(Date.now(), { limit });
+    console.log({
+      timeStamp: Date.now(),
+      ...summary
+    })
     return NextResponse.json(
       { ok: true, ...summary },
       { headers: { "cache-control": "no-store" } },
