@@ -25,6 +25,7 @@ export interface FakeActiveSessionRow {
   startedAt: Date;
   lastSeenAt: Date;
   deletedAt: Date | null;
+  endReason: string | null;
 }
 
 export interface FakeFootprintRow {
@@ -122,6 +123,7 @@ export function seedActiveSession(
     startedAt: new Date(),
     lastSeenAt: new Date(),
     deletedAt: null,
+    endReason: null,
     ...overrides,
   };
   db.activeSessions.push(row);
@@ -168,6 +170,23 @@ export const prisma = {
     async count({ where }: { where?: ActiveWhere } = {}) {
       checkFailure();
       return db.activeSessions.filter((row) => matchesActive(row, where)).length;
+    },
+    async findMany({
+      where,
+      orderBy,
+      take,
+    }: {
+      where?: ActiveWhere;
+      orderBy?: { startedAt?: "asc" | "desc" };
+      take?: number;
+    } = {}) {
+      checkFailure();
+      const rows = db.activeSessions.filter((row) => matchesActive(row, where));
+      if (orderBy?.startedAt) {
+        const sign = orderBy.startedAt === "asc" ? 1 : -1;
+        rows.sort((a, b) => sign * (a.startedAt.getTime() - b.startedAt.getTime()));
+      }
+      return take === undefined ? rows : rows.slice(0, take);
     },
     async deleteMany({ where }: { where?: ActiveWhere } = {}) {
       checkFailure();

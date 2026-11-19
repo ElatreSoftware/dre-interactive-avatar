@@ -72,6 +72,22 @@ try {
   const live = await prisma.activeSession.count({ where: { deletedAt: null } });
   if (live > 0) notes.push(`${live} call(s) currently counted as live.`);
 
+  // Concurrency limits are enforced from footprints: the heartbeat that holds
+  // a line and the ending that frees it are both events. With footprints off,
+  // a limit holds every line for the full quiet window and a long call can
+  // lose its line mid-conversation.
+  if (process.env.FOOTPRINTS_ENABLED === "false") {
+    const limited = await prisma.embedKey.count({
+      where: { enabled: true, maxConcurrentSessions: { not: null } },
+    });
+    if (limited > 0) {
+      fail(
+        `${limited} key(s) have a concurrent-call limit, but FOOTPRINTS_ENABLED=false.`,
+        "Limits are enforced from footprint events. Turn footprints on, or remove the limits.",
+      );
+    }
+  }
+
   // Retention runs from the ingest path, so a backlog means either nothing is
   // arriving or the sweep is failing. Either is worth knowing about.
   const cutoff = new Date(Date.now() - days * 86_400_000);

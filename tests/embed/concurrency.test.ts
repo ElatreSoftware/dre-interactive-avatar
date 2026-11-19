@@ -74,7 +74,7 @@ describe("stale sessions", () => {
    * customer's limit ratchets down to zero and stays there.
    */
   it("reclaims a slot nothing has been heard from, without losing the record", async () => {
-    seedActiveSession({ avatarSessionId: "ghost", lastSeenAt: new Date(NOW - 11 * MINUTE) });
+    seedActiveSession({ avatarSessionId: "ghost", lastSeenAt: new Date(NOW - 4 * MINUTE) });
     seedActiveSession({ avatarSessionId: "live", lastSeenAt: new Date(NOW - MINUTE) });
 
     await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
@@ -91,7 +91,7 @@ describe("stale sessions", () => {
     const closedAt = new Date(NOW - 5 * MINUTE);
     seedActiveSession({
       avatarSessionId: "ghost",
-      lastSeenAt: new Date(NOW - 11 * MINUTE),
+      lastSeenAt: new Date(NOW - 4 * MINUTE),
       deletedAt: closedAt,
     });
 
@@ -100,8 +100,8 @@ describe("stale sessions", () => {
     expect(db.activeSessions[0]!.deletedAt).toEqual(closedAt);
   });
 
-  it("keeps a call that is still reporting in", async () => {
-    seedActiveSession({ avatarSessionId: "live", lastSeenAt: new Date(NOW - 9 * MINUTE) });
+  it("keeps a call whose heartbeat is still arriving", async () => {
+    seedActiveSession({ avatarSessionId: "live", lastSeenAt: new Date(NOW - 2 * MINUTE) });
     await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
   });
 });
@@ -250,3 +250,29 @@ describe("a session that is simply too old", () => {
     await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
   });
 });
+
+describe("the quiet window", () => {
+  it("is three minutes by default, now that calls send a heartbeat", async () => {
+    seedActiveSession({ avatarSessionId: "quiet", lastSeenAt: new Date(NOW - 4 * MINUTE) });
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(0);
+
+    resetDb();
+    seedActiveSession({ avatarSessionId: "beating", lastSeenAt: new Date(NOW - 2 * MINUTE) });
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
+  });
+
+  it("takes a configured window", async () => {
+    vi.stubEnv("SESSION_STALE_MINUTES", "5");
+    seedActiveSession({ avatarSessionId: "quiet", lastSeenAt: new Date(NOW - 4 * MINUTE) });
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
+  });
+
+  it("refuses to go under two minutes, whatever it is told", async () => {
+    // Below two heartbeats, a live call loses its line between beats and a
+    // second caller gets in while the first is still talking.
+    vi.stubEnv("SESSION_STALE_MINUTES", "0.5");
+    seedActiveSession({ avatarSessionId: "beating", lastSeenAt: new Date(NOW - 90 * 1000) });
+    await expect(countActiveSessions("pk_dre_7f3a91c4", NOW)).resolves.toBe(1);
+  });
+});
+

@@ -38,6 +38,19 @@ function e2eDatabaseUrl(): string {
 
 export default defineConfig({
   testDir: "./e2e",
+  /**
+   * One worker, deliberately.
+   *
+   * Every spec drives the same application against the same e2e database, and
+   * the footprint specs wipe the table between tests. Run in parallel, a row
+   * written by `embed.spec.ts` lands in the middle of a `footprints.spec.ts`
+   * assertion — which is exactly the intermittent failure this suite had:
+   * `events.find(type === "widget_loaded")` would pick the other spec's row,
+   * which has no `userId`. Isolating by database per worker would be the
+   * other fix, and is not worth it for a suite that runs in under twenty
+   * seconds.
+   */
+  workers: 1,
   globalSetup: "./e2e/global-setup.mjs",
   // The widget asks for the microphone before opening, so grant it up front.
   use: {

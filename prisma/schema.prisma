@@ -132,6 +132,12 @@ model ActiveSession {
   /// enough that we reclaimed the line. Null means it is still running.
   deletedAt DateTime?
 
+  /// Why it stopped, when we know. LiveAvatar's own reason when the vendor
+  /// told us (USER_CLOSED, IDLE_TIMEOUT, NO_CREDITS, MAX_DURATION_REACHED,
+  /// ...), otherwise ours: "client" when the browser reported the end, or
+  /// "stale" when we reclaimed a line nothing had been heard from.
+  endReason String?
+
   /// Counting live calls is the hot path, and it always filters on both.
   @@index([embedKeyValue, deletedAt])
   @@index([deletedAt, lastSeenAt])

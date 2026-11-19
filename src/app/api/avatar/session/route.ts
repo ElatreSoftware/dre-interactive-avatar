@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { checkConcurrency, claimSession } from "@/embed/concurrency";
+import { reconcileSessions } from "@/embed/reconcile";
 import { GRANT_HEADER, verifyGrant } from "@/embed/grant";
 import { sessionRateLimiter } from "@/embed/rateLimit";
 import { embedOriginAllowed, findEmbedKey, type EmbedKeyRecord } from "@/embed/registry";
@@ -129,11 +130,21 @@ export async function POST(request: Request) {
 
   // Before the mint, not after: the vendor charges for a session whether or
   // not we then decide we did not want it.
+  //
+  // And before the count, awaited rather than left to the background sweep:
+  // this is the one moment the number has to be right. Someone whose last
+  // call ended in a tab that crashed is asking for a line now, and telling
+  // them every line is busy because of a row nobody closed is the exact
+  // failure this reconcile exists to prevent.
+  if (caller.record.maxConcurrentSessions !== null) {
+    await reconcileSessions(Date.now(), { embedKeyValue: caller.record.key }).catch(() => { });
+  }
+
   const concurrency = await checkConcurrency(caller.record);
   if (!concurrency.ok) {
     console.warn(
       `[avatar/session] ${caller.record.key} is at its concurrent limit ` +
-        `(${concurrency.active}/${concurrency.limit})`,
+      `(${concurrency.active}/${concurrency.limit})`,
     );
     return fail(429, "All available lines are busy. Try again in a moment.");
   }
@@ -202,7 +213,9 @@ export async function POST(request: Request) {
     return fail(502, "Could not start an avatar session.", raw);
   }
 
-  await claimSession(caller.record.key, result.data.data.session_id);
+  if (result.data.data.session_id) {
+    await claimSession(caller.record.key, result.data.data.session_id);
+  }
 
   return NextResponse.json(
     {

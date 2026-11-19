@@ -57,6 +57,11 @@ const simpleLifecycle = z.object({
     "user_speak_started",
     "user_speak_ended",
     "interruption",
+    // Sent on a timer while a call is live. Its only job is to keep
+    // `ActiveSession.lastSeenAt` meaning "this call still exists" rather than
+    // "somebody spoke recently" — two people sitting in silence produce no
+    // other events at all.
+    "heartbeat",
   ]),
 });
 

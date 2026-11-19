@@ -10,6 +10,7 @@
  *   pnpm embed:keys -- --key pk_dre_... --max-concurrent 5     (0 = unlimited)
  *   pnpm embed:keys -- --key pk_dre_... --add-origin https://new.example
  *   pnpm embed:keys -- --key pk_dre_... --remove-origin https://old.example
+ *   pnpm embed:keys -- --key pk_dre_... --free-lines
  */
 import { isValidOriginPattern } from "../src/embed/originMatch.ts";
 import { prisma } from "./db.mjs";
@@ -61,6 +62,21 @@ if (target) {
       }
       data.expiresAt = when;
     }
+  }
+
+  if (args.includes("--free-lines")) {
+    // For the call where a customer says every line is busy and nobody is on
+    // one. A crashed browser cannot tell us it is gone, and until the quiet
+    // window passes its row still holds a line.
+    const { count } = await prisma.activeSession.updateMany({
+      where: { embedKeyValue: target, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    console.log(
+      count === 0
+        ? `No lines were held by ${target}.`
+        : `Freed ${count} line(s) held by ${target}. Any call still running will be cut off.`,
+    );
   }
 
   const added = flags("add-origin");

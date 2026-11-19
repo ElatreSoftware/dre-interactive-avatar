@@ -14,6 +14,17 @@ import { MAX_TEXT_LENGTH, type FootprintPayload } from "./schema";
  * without the rest of the app keeping a tally for it.
  */
 
+/**
+ * How often a live call says it is still there.
+ *
+ * Short enough that the concurrency sweep can use a small window, long enough
+ * that an hour-long call costs sixty rows rather than six hundred.
+ */
+function heartbeatMs(): number {
+  const configured = Number(process.env.NEXT_PUBLIC_FOOTPRINT_HEARTBEAT_SECONDS);
+  return Number.isFinite(configured) && configured >= 10 ? configured * 1000 : 60_000;
+}
+
 export interface UseFootprintsOptions {
   sessionKey: string;
   grant?: string;
@@ -92,6 +103,7 @@ export function useFootprints(options: UseFootprintsOptions): Footprints {
 
   const collectorRef = useRef<FootprintCollector>(NOOP_COLLECTOR);
   const startedAt = useRef<number | null>(null);
+  const heartbeat = useRef<ReturnType<typeof setInterval> | null>(null);
   const turns = useRef(0);
   const interruptions = useRef(0);
   const recorded = useRef(new Set<string>());
@@ -114,6 +126,8 @@ export function useFootprints(options: UseFootprintsOptions): Footprints {
       collector.dispose();
       collectorRef.current = NOOP_COLLECTOR;
       described.current = false;
+      if (heartbeat.current) clearInterval(heartbeat.current);
+      heartbeat.current = null;
     };
   }, [enabled, sessionKey, grant, endpoint]);
 
@@ -128,6 +142,21 @@ export function useFootprints(options: UseFootprintsOptions): Footprints {
   const track = useCallback((payload: FootprintPayload) => {
     collectorRef.current.track(payload);
   }, []);
+
+  const stopHeartbeat = useCallback(() => {
+    if (!heartbeat.current) return;
+    clearInterval(heartbeat.current);
+    heartbeat.current = null;
+  }, []);
+
+  const startHeartbeat = useCallback(() => {
+    stopHeartbeat();
+    // Started from an event handler rather than an effect: it follows the
+    // call, not a render.
+    heartbeat.current = setInterval(() => {
+      collectorRef.current.track({ type: "heartbeat" });
+    }, heartbeatMs());
+  }, [stopHeartbeat]);
 
   const onEvent = useCallback(
     (event: AvatarLifecycleEvent) => {
@@ -145,9 +174,11 @@ export function useFootprints(options: UseFootprintsOptions): Footprints {
             type: "session_started",
             ...(event.sessionId ? { avatarSessionId: event.sessionId } : {}),
           });
+          startHeartbeat();
           return;
 
         case "session_ended":
+          stopHeartbeat();
           track({
             type: "session_ended",
             reason: event.reason,
@@ -184,7 +215,7 @@ export function useFootprints(options: UseFootprintsOptions): Footprints {
           track({ type: event.type });
       }
     },
-    [track],
+    [track, startHeartbeat, stopHeartbeat],
   );
 
   const onMessages = useCallback(

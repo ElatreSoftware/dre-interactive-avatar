@@ -510,3 +510,66 @@ describe("a tab closed without ending the call", () => {
     expect(events.filter((type) => type === "session_ended")).toHaveLength(1);
   });
 });
+
+describe("the heartbeat", () => {
+  /**
+   * `lastSeenAt` has to mean "this call still exists", not "somebody spoke
+   * recently". Two people sitting in silence produce no other events at all,
+   * and without this the concurrency sweep would take their line away.
+   */
+  it("reports while a call is live, with nothing else happening", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useFootprints({ sessionKey: "s", grant: "g" }));
+
+      act(() => result.current.onEvent({ type: "session_requested" }));
+      act(() => result.current.onEvent({ type: "session_started", sessionId: "vendor-1" }));
+
+      await act(async () => {
+        vi.advanceTimersByTime(3 * 60_000);
+        result.current.flush();
+      });
+
+      expect(typesOf().filter((type) => type === "heartbeat").length).toBeGreaterThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops when the call ends", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useFootprints({ sessionKey: "s", grant: "g" }));
+
+      act(() => result.current.onEvent({ type: "session_requested" }));
+      act(() => result.current.onEvent({ type: "session_started", sessionId: "vendor-1" }));
+      act(() => result.current.onEvent({ type: "session_ended", reason: "client" }));
+
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60_000);
+        result.current.flush();
+      });
+
+      // A finished call must not keep claiming a line.
+      expect(typesOf()).not.toContain("heartbeat");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not beat before a call starts", async () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useFootprints({ sessionKey: "s", grant: "g" }));
+
+      await act(async () => {
+        vi.advanceTimersByTime(5 * 60_000);
+        result.current.flush();
+      });
+
+      expect(typesOf()).not.toContain("heartbeat");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

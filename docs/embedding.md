@@ -3,11 +3,7 @@
 Put the assistant on your site with one script tag.
 
 ```html
-<script
-  src="https://widget.example.com/embed.js"
-  data-embed-key="pk_dre_7f3a91c4"
-  async
-></script>
+<script src="https://widget.example.com/embed.js" data-embed-key="pk_dre_7f3a91c4" async></script>
 ```
 
 That is the whole integration. A small round button appears in the corner;
@@ -45,18 +41,18 @@ browser blocks it, and your console will show a `frame-ancestors` violation.
 
 ## Script tag attributes
 
-| Attribute | Required | Description |
-|---|---|---|
-| `data-embed-key` | yes | Your public embed key. Safe to put in page source. |
-| `data-position` | no | `bottom-right` (default), `bottom-left`, `top-right`, `top-left`. |
-| `data-user-id` | no | An opaque id of your own, attached to the session. Do not put personal data here — an internal id, not an email address. |
+| Attribute        | Required | Description                                                                                                              |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `data-embed-key` | yes      | Your public embed key. Safe to put in page source.                                                                       |
+| `data-position`  | no       | `bottom-right` (default), `bottom-left`, `top-right`, `top-left`.                                                        |
+| `data-user-id`   | no       | An opaque id of your own, attached to the session. Do not put personal data here — an internal id, not an email address. |
 
 ## Controlling it from your own page
 
 ```js
-window.DreWidget.open();     // same as clicking the button, mic prompt included
-window.DreWidget.close();    // ends the call and collapses the widget
-window.DreWidget.destroy();  // removes it entirely
+window.DreWidget.open(); // same as clicking the button, mic prompt included
+window.DreWidget.close(); // ends the call and collapses the widget
+window.DreWidget.destroy(); // removes it entirely
 ```
 
 `open()` is safe to call before the widget has finished loading; the request is
@@ -86,13 +82,13 @@ clipped to the size of the bubble. This is what `embed.js` exists to handle.
 
 ## Troubleshooting
 
-| What you see | What it means |
-|---|---|
+| What you see                                    | What it means                                                                                  |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | Console: "Framing … violates … frame-ancestors" | Your origin is not on the key's allowlist. Send us the exact origin, scheme and port included. |
-| "This page hasn't allowed microphone access" | Your iframe tag is missing `allow="microphone"`. |
-| "Microphone access is blocked" | The visitor denied the browser prompt; they can change it in the site settings. |
-| The bubble appears but never opens | Check the console for a 403 from the session endpoint — usually a disabled key. |
-| Nothing appears at all | Check that the script tag has `data-embed-key`; the loader logs one error and stops. |
+| "This page hasn't allowed microphone access"    | Your iframe tag is missing `allow="microphone"`.                                               |
+| "Microphone access is blocked"                  | The visitor denied the browser prompt; they can change it in the site settings.                |
+| The bubble appears but never opens              | Check the console for a 403 from the session endpoint — usually a disabled key.                |
+| Nothing appears at all                          | Check that the script tag has `data-embed-key`; the loader logs one error and stops.           |
 
 ---
 
@@ -149,37 +145,113 @@ Live calls are tracked in the `ActiveSession` table, written when a session is
 minted — not derived from footprints, so the limit still holds with telemetry
 switched off. A slot is released when the call reports that it ended.
 
-#### How a line gets freed
+#### How a line is held, and how it comes back
 
-Three ways, in order of how quickly they work:
+A live call **says it is still there once a minute**. That heartbeat is the
+whole mechanism: `lastSeenAt` means "this call exists", not "somebody spoke
+recently" — two people sitting in silence produce no other events at all.
 
-1. **The call ends** — the visitor presses End. The `session_ended` footprint
-   closes the row immediately.
-2. **The tab closes without ending the call.** The common case: nobody presses
-   End, they just close the tab. `pagehide` reports the ending and sends it
-   with `sendBeacon`, which survives unload where a `fetch` is cancelled. The
-   line is freed at once, same as (1).
-3. **Nothing is heard again** — the browser crashed, the lid closed, the
-   network went. Nothing can report that, so those rows are reclaimed after
-   **ten minutes** without a sign of life.
-4. **It is simply too old.** A row older than **an hour** is closed whatever
-   its last event said. The quiet check in (3) trusts a stream of events, and
-   anything stuck — a page left open in a background tab, a loop that keeps
-   reporting — can keep that stream alive indefinitely and hold a line
-   forever. Vendor sessions have their own maximum duration well under an
-   hour, so an hour-old row is not a call any more. `SESSION_MAX_AGE_MINUTES`
-   changes it.
+A line comes back six ways:
 
-Ten minutes is therefore the longest a customer can be short a line through no
-fault of their own. The sweep runs when the next session is requested, so the
-next caller triggers the cleanup and is then let through: nobody waits on a
-timer, only on their own next attempt.
+|                                                                                 | When                                                                                                   |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| The visitor presses **End**                                                     | at once                                                                                                |
+| They **close the tab**                                                          | at once — reported on `pagehide`, sent by beacon                                                       |
+| The **vendor ends the session** (its own duration limit) and the tab is open    | at once                                                                                                |
+| **LiveAvatar says the call is over** — whatever the browser did or failed to do | within `SESSION_RECONCILE_SECONDS`, default **60**, and immediately when the next session is requested |
+| **Nothing is ever heard again** — crash, lid closed, power, network             | after `SESSION_STALE_MINUTES`, default **3**                                                           |
+| A row is **older than `SESSION_MAX_AGE_MINUTES`** (default 60)                  | at that age, whatever it last said                                                                     |
 
-**With `FOOTPRINTS_ENABLED=false`, only (3) applies.** Endings travel as
-footprints, so with telemetry off nothing reports them and every line is held
-the full ten minutes. Worse, `lastSeenAt` is only refreshed by arriving
-events, so a call lasting longer than ten minutes looks dead while it is still
-running. If you set a concurrency limit, leave footprints on.
+The fourth is the authoritative one, and worth being precise about, because it
+is the only one that does not depend on our own guesswork. Everything else is
+inferred from this side: the browser reporting its own ending (which a crashed
+tab never does), or a timeout, which is a guess wearing a confident expression.
+LiveAvatar is the only party that actually knows, and
+`GET /v1/sessions/{id}` is how it is asked.
+
+**There is no webhook, and that is not for want of looking.** LiveAvatar
+publishes none — its OpenAPI document declares no `webhooks` object and does
+not mention the word. HeyGen's API does have webhooks, and its catalog lists
+`live_avatar.success` / `live_avatar.fail`, but those do not fire for
+LiveAvatar sessions; it is a separate product. We tried it. So the state is
+pulled rather than pushed, and that is a property of the vendor, not a
+shortcut taken here.
+
+An ended session is recognised by `end_at` appearing on the response, and the
+reason it carries — `USER_CLOSED`, `IDLE_TIMEOUT`, `NO_CREDITS`,
+`MAX_DURATION_REACHED`, and so on — is kept on the row in `endReason`. Rows
+closed from our side are marked `client` or `stale` instead, so it is always
+possible to tell what actually released a line from what we assumed.
+
+##### Running it
+
+The reconcile needs a clock. Point cron at it once a minute:
+
+```
+* * * * * curl -fsS -X POST https://your-host/api/cron/reconcile \
+  -H "authorization: Bearer $CRON_SECRET" >/dev/null
+```
+
+It answers `{"ok":true,"checked":N,"closed":N}`, and a non-2xx on failure, so
+your cron runner's own alerting notices a job that has quietly stopped
+working. `CRON_SECRET` is required — without it the endpoint refuses to run
+rather than standing open, because anything that frees lines is also a way to
+hang up calls. `GET` works too, for runners that only issue those.
+
+A minute is safe _because the endpoint asks the vendor_. A one-minute silence
+timeout would be a different thing and a dangerous one: the heartbeat is 60
+seconds, so a healthy call is routinely 60–90 seconds past its last beat, and
+that rule would hang up live conversations. This closes on fact instead, which
+is why the cadence can be as tight as you like.
+
+The only other place a reconcile runs is the session-mint path, awaited, for
+keys that have a concurrency limit — that is the one moment the count has to
+be exactly right, and it is scoped to the single customer asking.
+
+Two deliberate refusals in it:
+
+The last two rows only wait because nothing is alive to report. The sweep runs
+when the next session is requested, so the blocked caller is the one who clears
+it and is then let through — nobody waits on a background timer, only on their
+own next attempt.
+
+Note that that wait is measured from the **last heartbeat**, not from when the
+tab closed. At the default settings it is at most three minutes — and in
+practice the reconcile usually gets there first.
+
+#### Settings
+
+```
+SESSION_STALE_MINUTES=3                       # floored at 2, see below
+NEXT_PUBLIC_FOOTPRINT_HEARTBEAT_SECONDS=60
+SESSION_MAX_AGE_MINUTES=60                    # a little above the vendor's session limit
+SESSION_RECONCILE_SECONDS=60                  # how often LiveAvatar is asked
+SESSION_RECONCILE_GRACE_SECONDS=120           # don't ask about a session this new
+```
+
+`SESSION_STALE_MINUTES` is floored at two minutes in code. Below two
+heartbeats, a live call loses its line between beats and a second caller gets
+in while the first is still talking — a worse failure than waiting.
+
+If your vendor sessions are ten minutes, set `SESSION_MAX_AGE_MINUTES=12`. The
+default hour is sized for long calls you do not have.
+
+#### When a line is stuck
+
+```bash
+pnpm embed:keys                                   # shows live-vs-limit per key
+pnpm embed:keys -- --key pk_dre_... --free-lines  # closes every open row for that key
+```
+
+`--free-lines` is for the call where a customer says every line is busy and
+nobody is on one. It cuts off anything genuinely still running, so check the
+live count first.
+
+**Limits need footprints.** The heartbeat that holds a line and the ending
+that frees it are both footprint events. With `FOOTPRINTS_ENABLED=false` a
+limit holds every line for the full quiet window, and a call longer than that
+window loses its line mid-conversation. `pnpm footprints:check` fails if you
+configure both.
 
 **No restart.** Keys are cached for thirty seconds, so issuing, changing or
 disabling one takes effect on its own within that window. If the database is

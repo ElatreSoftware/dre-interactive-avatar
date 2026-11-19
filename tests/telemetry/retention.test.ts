@@ -173,6 +173,7 @@ describe("closed call records", () => {
       embedKeyValue: "pk_test",
       startedAt: new Date(NOW - (days ?? 0) * DAY),
       lastSeenAt: new Date(NOW - (days ?? 0) * DAY),
+      endReason: null,
       deletedAt: days === null ? null : new Date(NOW - days * DAY),
     });
   }

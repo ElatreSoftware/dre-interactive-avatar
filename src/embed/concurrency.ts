@@ -19,8 +19,19 @@ import type { EmbedKeyRecord } from "./registry";
  * rows are cleared out by the same retention sweep as footprints.
  */
 
-/** A session nothing has been heard from for this long is assumed dead. */
-const STALE_AFTER_MS = 10 * 60 * 1000;
+/**
+ * A session nothing has been heard from for this long is assumed dead.
+ *
+ * Safe to keep short because a live call sends a heartbeat every minute. It
+ * was ten minutes when `lastSeenAt` only moved when somebody spoke, since two
+ * people sitting quietly would otherwise have had their line taken away.
+ *
+ * The floor below is the point: set this under two heartbeats and a live call
+ * loses its line between beats, letting a second caller in while the first is
+ * still talking.
+ */
+const STALE_AFTER_MS = 3 * 60 * 1000;
+const MIN_STALE_MS = 2 * 60 * 1000;
 
 /**
  * No call holds a line longer than this, whatever it claims.
@@ -41,8 +52,14 @@ function maxAgeMs(): number {
 
 export type ClaimResult = { ok: true } | { ok: false; active: number; limit: number };
 
+function staleAfterMs(): number {
+  const configured = Number(process.env.SESSION_STALE_MINUTES);
+  if (!Number.isFinite(configured) || configured <= 0) return STALE_AFTER_MS;
+  return Math.max(configured * 60_000, MIN_STALE_MS);
+}
+
 function staleBefore(now: number): Date {
-  return new Date(now - STALE_AFTER_MS);
+  return new Date(now - staleAfterMs());
 }
 
 function startedBefore(now: number): Date {
@@ -70,7 +87,7 @@ export async function countActiveSessions(
         { startedAt: { lt: startedBefore(now) } },
       ],
     },
-    data: { deletedAt: new Date(now) },
+    data: { deletedAt: new Date(now), endReason: "stale" },
   });
   return prisma.activeSession.count({ where: { embedKeyValue, deletedAt: null } });
 }
@@ -143,7 +160,7 @@ export async function releaseSession(sessionKey: string): Promise<void> {
   try {
     await prisma.activeSession.updateMany({
       where: { sessionKey, deletedAt: null },
-      data: { deletedAt: new Date() },
+      data: { deletedAt: new Date(), endReason: "client" },
     });
   } catch (error) {
     console.error("[embed] could not release an active session:", error);
